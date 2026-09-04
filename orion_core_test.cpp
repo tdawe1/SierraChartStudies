@@ -61,6 +61,8 @@ int main() {
 	const int nlow = orion::group_vap(low_stack, 3, 1, g_low, 8);
 	orion::StackResult long_stack = orion::count_stacked(g_low, nlow, false, 8, 3.0, 3);
 	expect_int(long_stack.stacked, 2, "long stacked ask 3:1 from low");
+	expect_int(long_stack.zone_low_bucket, 50, "long zone low bucket");
+	expect_int(long_stack.zone_high_bucket, 51, "long zone high bucket");
 
 	orion::VapLevel high_stack[3];
 	high_stack[0] = {90, 4, 4};
@@ -126,6 +128,8 @@ int main() {
 
 	expect(orion::bar_delta_supports(5, 0, false), "long allows +delta at thresh 0");
 	expect(!orion::bar_delta_supports(-1, 0, false), "long rejects -delta at thresh 0");
+	expect(!orion::bar_delta_supports(0, 0, false), "long rejects zero delta");
+	expect(!orion::bar_delta_supports(0, 0, true), "short rejects zero delta");
 	expect(orion::bar_delta_supports(-12, 8, true), "short needs delta <= -thresh");
 	expect(!orion::bar_delta_supports(-3, 8, true), "short rejects small negative delta");
 
@@ -150,6 +154,11 @@ int main() {
 	expect_int(orion::pick_setup_direction(false, 0, true, 2, 9), -1, "short only");
 	expect_int(orion::trigger_offset_ticks(4), 7, "trigger offset is arrow+3");
 
+	expect(orion::can_trigger(11, 10, 1, 3), "can trigger next bar within life");
+	expect(orion::can_trigger(13, 10, 1, 3), "can trigger on last life bar");
+	expect(!orion::can_trigger(14, 10, 1, 3), "no trigger after lifetime");
+	expect(!orion::can_trigger(10, 10, 1, 3), "no trigger on arm bar");
+
 	expect(orion::trigger_bar_ok(11, 10, 1), "trigger allowed on next bar");
 	expect(!orion::trigger_bar_ok(10, 10, 1), "no trigger on arm bar");
 	expect(!orion::trigger_bar_ok(12, 10, 0), "no trigger when disarmed");
@@ -172,6 +181,43 @@ int main() {
 	const int ng_tiny = orion::group_vap(many, 4, 1, tiny, 2, &trunc);
 	expect_int(ng_tiny, 2, "group_vap stops at maxdst");
 	expect(trunc, "group_vap sets truncated");
+
+	orion::VapLevel thin[4];
+	thin[0] = {50, 1, 8};
+	thin[1] = {51, 1, 8};
+	thin[2] = {52, 1, 8};
+	thin[3] = {53, 1, 8};
+	orion::StackResult wide = orion::count_stacked_multiscale(
+		thin, 4, 1, false, 10, 3.0, 3, 2, scratch, orion::kMaxLevels);
+	expect_int(wide.stacked, 2, "merged scale beats thin 1-tick levels");
+	expect_int(wide.scale, 2, "winning scale is 2 when it stacks more");
+
+	orion::VapLevel spread[6];
+	for (int i = 0; i < 6; ++i) {
+		spread[i].price_ticks = i * 10;
+		spread[i].bid = 1;
+		spread[i].ask = 1;
+	}
+	orion::VapLevel low_keep[2];
+	orion::VapLevel high_keep[2];
+	int nlow_ext = 0;
+	int nhigh_ext = 0;
+	for (int i = 0; i < 6; ++i) {
+		orion::consider_lowest_price(low_keep, &nlow_ext, 2, spread[i]);
+		orion::consider_highest_price(high_keep, &nhigh_ext, 2, spread[i]);
+	}
+	orion::VapLevel kept[4];
+	const int nkept = orion::merge_extreme_vap(low_keep, nlow_ext, high_keep, nhigh_ext, kept, 4);
+	expect_int(nkept, 4, "keep two lows and two highs");
+	expect_int(kept[0].price_ticks, 0, "lowest kept");
+	expect_int(kept[1].price_ticks, 10, "second lowest kept");
+	expect_int(kept[2].price_ticks, 40, "second highest kept");
+	expect_int(kept[3].price_ticks, 50, "highest kept");
+
+	long_stack.scale = 1;
+	orion::fill_grouped_poc(&long_stack, g_low, nlow, false);
+	expect_int(long_stack.zone_low_ticks, 50, "zone low ticks at scale 1");
+	expect_int(long_stack.zone_high_ticks, 51, "zone high ticks at scale 1");
 
 	if (g_failed != 0) {
 		std::printf("\n%d failed\n", g_failed);

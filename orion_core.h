@@ -31,6 +31,10 @@ struct StackResult {
 	int scale = 1;
 	int poc_bucket = 0;
 	int poc_ticks = 0;
+	int zone_low_bucket = 0;
+	int zone_high_bucket = 0;
+	int zone_low_ticks = 0;
+	int zone_high_ticks = 0;
 	double extreme_volume = 0;
 	double extreme_delta = 0;
 	double zone_volume = 0;
@@ -141,6 +145,17 @@ inline bool trigger_bar_ok(int index, int armed_bar, int armed_dir) {
 	return armed_dir != 0 && armed_bar >= 0 && index > armed_bar;
 }
 
+inline bool arm_in_lifetime(int index, int armed_bar, int lifetime_bars) {
+	if (lifetime_bars < 1)
+		lifetime_bars = 1;
+	return index - armed_bar <= lifetime_bars;
+}
+
+inline bool can_trigger(int index, int armed_bar, int armed_dir, int lifetime_bars) {
+	return trigger_bar_ok(index, armed_bar, armed_dir)
+		&& arm_in_lifetime(index, armed_bar, lifetime_bars);
+}
+
 // Walk from the extreme. Long = lowest buckets, ask-dominant. Short = highest, bid-dominant.
 // Consecutive buckets only; a gap ends the stack.
 inline StackResult count_stacked(
@@ -182,6 +197,14 @@ inline StackResult count_stacked(
 			break;
 		++out.stacked;
 		out.zone_volume += levels[i].volume();
+		if (out.stacked == 1) {
+			out.zone_low_bucket = levels[i].bucket;
+			out.zone_high_bucket = levels[i].bucket;
+		} else if (levels[i].bucket < out.zone_low_bucket) {
+			out.zone_low_bucket = levels[i].bucket;
+		} else if (levels[i].bucket > out.zone_high_bucket) {
+			out.zone_high_bucket = levels[i].bucket;
+		}
 		prev_bucket = levels[i].bucket;
 	}
 	return out;
@@ -220,12 +243,19 @@ inline void fill_grouped_poc(StackResult* st, const GroupedLevel* levels, int n,
 		return;
 	st->poc_bucket = grouped_poc_bucket(levels, n, is_short);
 	st->poc_ticks = grouped_poc_ticks(st->poc_bucket, st->scale);
+	if (st->stacked <= 0)
+		return;
+	const int scale = st->scale < 1 ? 1 : st->scale;
+	st->zone_low_ticks = st->zone_low_bucket * scale;
+	st->zone_high_ticks = (st->zone_high_bucket + 1) * scale - 1;
+	if (st->zone_high_ticks < st->zone_low_ticks)
+		st->zone_high_ticks = st->zone_low_ticks;
 }
 
-// Model: try grouping 1,2,3,4 plus the user scale. First scale that
-// reaches min_stacked wins. Anchor is in grouped-bucket units (same
-// integer at every scale). POC is the max-volume grouped bucket at
-// that winning scale, converted back to ticks at bucket center.
+// Try grouping 1–4 plus the user scale when it is outside 1–4.
+// Keep the largest stack; a tie uses the tighter scale. Anchor is in
+// grouped-bucket units. POC is the max-volume grouped bucket at the
+// winning scale, converted back to ticks at bucket center.
 inline StackResult count_stacked_multiscale(
 	const VapLevel* src,
 	int nsrc,
@@ -238,6 +268,7 @@ inline StackResult count_stacked_multiscale(
 	GroupedLevel* scratch,
 	int scratch_max
 ) {
+	(void)min_stacked;
 	StackResult best;
 	int scales[5];
 	int nscales = 0;
@@ -256,8 +287,8 @@ inline StackResult count_stacked_multiscale(
 		fill_grouped_poc(&st, scratch, ng, is_short);
 		if (st.stacked > best.stacked)
 			best = st;
-		if (best.stacked >= min_stacked)
-			return best;
+		else if (st.stacked == best.stacked && st.stacked > 0 && scales[i] < best.scale)
+			best = st;
 	}
 	return best;
 }
@@ -293,11 +324,16 @@ inline bool lookback_extreme(
 	return true;
 }
 
-// Mode 2 bar-delta filter: long wants ask-bid >= +threshold, short wants
-// ask-bid <= -threshold. Threshold 0 still requires the matching sign.
+// Directional bar-delta filter. Threshold 0 requires a strict sign
+// (long > 0, short < 0) so a flat bar cannot pass both sides.
 inline bool bar_delta_supports(double ask_minus_bid, double threshold, bool is_short) {
-	if (is_short)
+	if (is_short) {
+		if (ask_minus_bid >= 0)
+			return false;
 		return ask_minus_bid <= -threshold;
+	}
+	if (ask_minus_bid <= 0)
+		return false;
 	return ask_minus_bid >= threshold;
 }
 
@@ -485,6 +521,78 @@ inline bool extreme_broken(
 	if (is_short)
 		return high > armed_extreme + pad;
 	return low < armed_extreme - pad;
+}
+
+inline void consider_lowest_price(VapLevel* arr, int* n, int cap, const VapLevel& x) {
+	if (arr == nullptr || n == nullptr || cap <= 0)
+		return;
+	if (*n < cap) {
+		arr[(*n)++] = x;
+		return;
+	}
+	int worst = 0;
+	for (int i = 1; i < cap; ++i) {
+		if (arr[i].price_ticks > arr[worst].price_ticks)
+			worst = i;
+	}
+	if (x.price_ticks < arr[worst].price_ticks)
+		arr[worst] = x;
+}
+
+inline void consider_highest_price(VapLevel* arr, int* n, int cap, const VapLevel& x) {
+	if (arr == nullptr || n == nullptr || cap <= 0)
+		return;
+	if (*n < cap) {
+		arr[(*n)++] = x;
+		return;
+	}
+	int worst = 0;
+	for (int i = 1; i < cap; ++i) {
+		if (arr[i].price_ticks < arr[worst].price_ticks)
+			worst = i;
+	}
+	if (x.price_ticks > arr[worst].price_ticks)
+		arr[worst] = x;
+}
+
+inline int merge_extreme_vap(
+	const VapLevel* lows,
+	int nlow,
+	const VapLevel* highs,
+	int nhigh,
+	VapLevel* dst,
+	int maxdst
+) {
+	if (dst == nullptr || maxdst <= 0)
+		return 0;
+	int written = 0;
+	auto push_unique = [&](const VapLevel& x) {
+		if (written >= maxdst)
+			return;
+		for (int i = 0; i < written; ++i) {
+			if (dst[i].price_ticks == x.price_ticks)
+				return;
+		}
+		dst[written++] = x;
+	};
+	if (lows != nullptr) {
+		for (int i = 0; i < nlow; ++i)
+			push_unique(lows[i]);
+	}
+	if (highs != nullptr) {
+		for (int i = 0; i < nhigh; ++i)
+			push_unique(highs[i]);
+	}
+	for (int i = 1; i < written; ++i) {
+		VapLevel cur = dst[i];
+		int j = i;
+		while (j > 0 && dst[j - 1].price_ticks > cur.price_ticks) {
+			dst[j] = dst[j - 1];
+			--j;
+		}
+		dst[j] = cur;
+	}
+	return written;
 }
 
 }  // namespace orion
