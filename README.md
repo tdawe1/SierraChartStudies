@@ -1,23 +1,31 @@
-# FlipperStudies
+# Sierra Chart studies
 
-## **The Flipper**
+Copy the `.cpp` (and any matching `.h`) into Sierra Chart `ACS_Source`, then **Analysis → Build Custom Studies DLL → Remote Build**.
 
-- Detects delta flips (changes in buying/selling pressure) with customizable thresholds.
-- Supports strong flip detection based on a multiplier of the delta threshold.
-- Optional next-bar confirmation to reduce false signals.
-- Visual markers for bearish and bullish flips on price highs/lows.
+## Orion
 
-## **Delta Colored Candles**
+Stacked bid/ask absorption at a lookback swing (setup arrow), then a max/min-delta climax with rebound on bar ask−bid (trigger point).
 
-- Colors candlesticks based on positive/negative delta thresholds.
-- Integrates RSI calculations on Cumulative Volume Delta (CVD) for additional coloring logic.
-- Supports absolute value thresholds for symmetric delta analysis.
-- Customizable neutral, buy, and sell colors for clear visualization.
+Files: `Orion.cpp`, `orion_core.h`.
 
-## **Discord Alerts**
+1. Copy both into `ACS_Source` (for example `C:\SierraChart\ACS_Source\`).
+2. Analysis → Build Custom Studies DLL → select `Orion.cpp` → Remote Build.
+3. Add **Orion**. Point **Max delta** and **Min delta** at Numbers Bars Calculated Values subgraphs for maximum and minimum ask-bid difference.
+4. Recalculate. After an update that changes input order, remove the study and add it again.
 
-- Sends trade alerts to Discord channels via webhooks when new positions are established.
-- Automatically detects position entries (long/short) while filtering out adjustments and exits.
-- Includes critical trade information: position type, fill price, target price, and stop loss.
-- Configurable webhook URL for easy integration with any Discord server.
-- Proper JSON formatting with character escaping for reliable message delivery.
+Alerts: 1 setup short, 2 setup long, 3 trigger.
+
+Core tests (no Sierra headers):
+
+```
+g++ -std=c++17 -O2 -o /tmp/orion_core_test orion_core_test.cpp && /tmp/orion_core_test
+```
+
+## Other studies
+
+| Study | Source |
+|---|---|
+| The Flipper / Delta Colored Candles | `FlipperStudies.cpp` |
+| Discord Alerts | `DiscordAlerts.cpp` |
+| Initial Balance Statistics | `InitialBalanceStatistics.cpp` |
+| Saty Pivot Ribbon | `SatyPivotRibbon.cpp` |
