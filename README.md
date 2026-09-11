@@ -16,7 +16,7 @@ One file: `Orion.cpp`. Remote Build ignores extra headers unless you also select
 4. Point **Max delta** and **Min delta** at Numbers Bars Calculated Values subgraphs for maximum and minimum ask-bid difference.
 5. Recalculate. After an update that changes input order, remove the study and add it again.
 
-Alerts: 1 setup short, 2 setup long, 3 trigger. Optional arm-status text and absorption zone are on by default; turn them off under **Display**. After this update, remove and re-add the study so the new inputs appear.
+Alerts: setup short, setup long, and trigger, each with its own on/off toggle and alert number (defaults 1, 2, 3). The setup master toggle stays off by default. Optional arm-status text, data overlay, and absorption zone are on by default; turn them off under **Display**. New study **Orion - Account Balance (Live)** shows opening balance plus today's closed P/L plus open position P/L for accounts without EOD reconciliation. After this update, remove and re-add the study so the new inputs appear.
 
 Core tests (no Sierra headers):
 
@@ -32,3 +32,11 @@ g++ -std=c++17 -O2 -o /tmp/orion_core_test orion_core_test.cpp && /tmp/orion_cor
 | Discord Alerts | `DiscordAlerts.cpp` |
 | Initial Balance Statistics | `InitialBalanceStatistics.cpp` |
 | Saty Pivot Ribbon | `SatyPivotRibbon.cpp` — Add Custom Study → **Saty Pivot Ribbon** |
+
+## Backtesting
+
+Local assessment system for the studies: batch runs, results store, in/out-of-sample + walk-forward checks, one-command comparison report with equity curves. See `backtest/README.md`.
+
+```
+python3 backtest/bt.py demo --out demo-report.html
+```
