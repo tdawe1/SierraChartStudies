@@ -1154,6 +1154,8 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 	int& arm_stacked = sc.GetPersistentInt(7);
 	int& arm_scale = sc.GetPersistentInt(8);
 	int& mixed_delta_logged = sc.GetPersistentInt(9);
+	int& setup_alert_key = sc.GetPersistentInt(10);
+	int& trigger_alert_key = sc.GetPersistentInt(11);
 
 	float& armed_px = sc.GetPersistentFloat(1);
 	float& climax_val = sc.GetPersistentFloat(2);
@@ -1178,7 +1180,8 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 			sc.IsFullRecalculation != 0, sc.Index, sc.UpdateStartIndex)) {
 		disarm();
 		fbar_index = -1;
-		triggered_bar = -1;
+		setup_alert_key = -1;
+		trigger_alert_key = -1;
 		vap_truncated_logged = 0;
 		mixed_delta_logged = 0;
 		fbar_max = 0;
@@ -1349,8 +1352,11 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 				TriggerLong[index] = static_cast<float>(sc.Low[index] - trig_off);
 			triggered_bar = index;
 			did_trigger = true;
-			if (InTriggerAlert.GetYesNo() && index >= last_index - 1 && !sc.IsFullRecalculation) {
+			const int trigger_key = index * 2 + (is_short ? 1 : 0);
+			if (InTriggerAlert.GetYesNo() && index >= last_index - 1 && !sc.IsFullRecalculation
+				&& trigger_alert_key != trigger_key) {
 				SCString msg;
+				trigger_alert_key = trigger_key;
 				msg.Format(
 					"ORION TRIGGER %s climax=%.0f delta=%.0f stack=%d scale=%d",
 					is_short ? "SHORT" : "LONG",
@@ -1457,10 +1463,13 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 				ZoneHigh[index] = zhi;
 				ZoneLow[index] = zlo;
 			}
+			const int setup_key = index * 2 + (is_short ? 1 : 0);
 			if (new_arm && InSetupAlert.GetYesNo()
 				&& (is_short ? InSetupShortAlert.GetYesNo() : InSetupLongAlert.GetYesNo())
-				&& index >= last_index - 1 && !sc.IsFullRecalculation) {
+				&& index >= last_index - 1 && !sc.IsFullRecalculation
+				&& setup_alert_key != setup_key) {
 				SCString msg;
+				setup_alert_key = setup_key;
 				msg.Format(
 					"ORION SETUP %s stack=%d scale=%d",
 					is_short ? "SHORT" : "LONG", arm_stacked, arm_scale);
@@ -1563,11 +1572,18 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 	SCInputRef InShowParts = sc.Input[2];
 	SCInputRef InRefreshSec = sc.Input[3];
 	SCInputRef InShowBroker = sc.Input[4];
+	SCInputRef InOpeningIncludesDay = sc.Input[5];
+	SCInputRef InRTCommission = sc.Input[6];
+	SCInputRef InClosedRoundTurns = sc.Input[7];
 	if (sc.SetDefaults) {
 		sc.GraphName = "Orion - Account Balance (Live)";
 		sc.StudyDescription =
 			"Live balance for accounts without EOD reconciliation (prop firms): "
 			"opening balance plus today's closed P/L plus open position P/L. "
+			"Sierra P/L figures exclude commissions: set the round-turn commission "
+			"to deduct an estimate. If the feed's account value already moves with "
+			"today's P/L, enable the opening-includes-day option so it is backed out "
+			"instead of double-counted. "
 			"All figures use the chart trade account; P/L covers the chart symbol.";
 		sc.AutoLoop = 1;
 		sc.UpdateAlways = 1;
@@ -1590,6 +1606,14 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		InRefreshSec.SetIntLimits(1, 300);
 		InShowBroker.Name = "Show broker-reported balance";
 		InShowBroker.SetYesNo(true);
+		InOpeningIncludesDay.Name = "Opening balance already includes today's closed P/L";
+		InOpeningIncludesDay.SetYesNo(false);
+		InRTCommission.Name = "Round-turn commission per contract (0 disables)";
+		InRTCommission.SetFloat(0);
+		InRTCommission.SetFloatLimits(0, 1000);
+		InClosedRoundTurns.Name = "Closed round-turn contracts today (for commission estimate)";
+		InClosedRoundTurns.SetInt(0);
+		InClosedRoundTurns.SetIntLimits(0, 1000000);
 		return;
 	}
 	if (sc.Index != sc.ArraySize - 1)
@@ -1612,10 +1636,27 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 	if (sc.GetTradeStatisticsForSymbolV2(n_ACSIL::STATS_TYPE_DAILY_ALL_TRADES, stats) != 0)
 		daily_closed = stats.ClosedTradesProfitLoss;
 	double open_pl = 0;
+	double position_qty = 0;
 	s_SCPositionData pos;
-	if (sc.GetTradePosition(pos) == 1)
+	if (sc.GetTradePosition(pos) == 1) {
 		open_pl = pos.OpenProfitLoss;
-	const double live = opening + daily_closed + open_pl;
+		position_qty = pos.PositionQuantity;
+	}
+	// Sierra P/L figures exclude commissions: deduct the Sierra-convention
+	// estimate (round-turn rate x qty / 2 for the open leg, rate x closed
+	// round turns for the day). All zeros by default = previous behavior.
+	const double rt_rate = static_cast<double>(InRTCommission.GetFloat());
+	const double open_comm = rt_rate * fabs(position_qty) / 2.0;
+	const double closed_comm =
+		rt_rate * static_cast<double>(InClosedRoundTurns.GetInt());
+	const double day_net = daily_closed - closed_comm;
+	const double pos_net = open_pl - open_comm;
+	// Some feeds roll today's closed P/L into the account value intraday;
+	// back it out so it is not counted twice.
+	double opening_base = opening;
+	if (InOpeningIncludesDay.GetYesNo() != 0)
+		opening_base = opening - daily_closed;
+	const double live = opening_base + day_net + pos_net;
 	auto draw_balance = [&](int line_number, int vpos, const SCString& line_text) {
 		s_UseTool tool;
 		tool.Clear();
@@ -1642,7 +1683,7 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		SCString line2;
 		line2.Format(
 			"open %.2f day %+.2f pos %+.2f",
-			opening, daily_closed, open_pl);
+			opening_base, day_net, pos_net);
 		if (InShowBroker.GetYesNo() != 0) {
 			SCString line3;
 			const double broker = sc.GetTradeServiceAccountBalanceForTradeAccount(account);
