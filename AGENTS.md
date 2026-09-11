@@ -47,3 +47,23 @@
 ## Backtesting
 
 `backtest/` holds the local assessment harness: `python3 backtest/bt.py demo --out demo-report.html`.
+
+## Other studies
+
+- `FlipperStudies.cpp` was a full-file merge conflict (theirs + HEAD
+  concatenated, duplicate studies). Resolved theirs-first, then appended the
+  HEAD-only `scsf_DynamicFlipper`. When merging duplicates, diff the shared
+  studies first — here they differed by whitespace only.
+- `SatyPivotRibbon.cpp` had two real bugs: `SCStudyGraphRef` (must be
+  `SCStudyInterfaceRef`) and `DRAWSTYLE_COLORBAR` (official name is
+  `DRAWSTYLE_COLOR_BAR`, verified against Sierra docs).
+- `DiscordAlerts.cpp`: pass `SCString` to `const char*` params via `.GetChars()`,
+  never rely on implicit conversion.
+- Syntax-check loop for every study (stub is at `/tmp/orion_check/sierrachart.h`,
+  extended as new ACSIL APIs appear):
+  `for f in *.cpp; do g++ -std=c++17 -fsyntax-only -I/tmp/orion_check $f; done`
+  All five studies must print no errors. Stub gaps (missing member/constant) vs
+  real bugs (wrong type/name per Sierra docs) — verify the latter before
+  touching source.
+- `backtest/` is tracked (its own `.gitignore` excludes outputs). `*_64.dll`
+  files are build artifacts: untracked, never commit them.

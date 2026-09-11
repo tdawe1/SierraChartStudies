@@ -159,7 +159,7 @@ SCSFExport scsf_DiscordTradeAlert(SCStudyInterfaceRef sc) {
                                  targetPrice, 
                                  stopPrice);
 
-              SendDiscordAlert(sc, alertMessage);
+              SendDiscordAlert(sc, alertMessage.GetChars());
             }
         } else {
             sc.AddMessageToLog("Order detected as flattening or adjusting position - not sending alert", 0);
