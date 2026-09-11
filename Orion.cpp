@@ -1558,19 +1558,19 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 constexpr int kBalanceDrawing = 202609044;
 SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 	SCSubgraphRef BalanceText = sc.Subgraph[0];
-	SCInputRef InAccount = sc.Input[0];
-	SCInputRef InManualOpening = sc.Input[1];
-	SCInputRef InOpeningValue = sc.Input[2];
-	SCInputRef InShowParts = sc.Input[3];
-	SCInputRef InRefreshSec = sc.Input[4];
-	SCInputRef InShowBroker = sc.Input[5];
+	SCInputRef InManualOpening = sc.Input[0];
+	SCInputRef InOpeningValue = sc.Input[1];
+	SCInputRef InShowParts = sc.Input[2];
+	SCInputRef InRefreshSec = sc.Input[3];
+	SCInputRef InShowBroker = sc.Input[4];
 	if (sc.SetDefaults) {
 		sc.GraphName = "Orion - Account Balance (Live)";
 		sc.StudyDescription =
 			"Live balance for accounts without EOD reconciliation (prop firms): "
 			"opening balance plus today's closed P/L plus open position P/L. "
-			"Leave the account blank to use the chart account.";
+			"All figures use the chart trade account; P/L covers the chart symbol.";
 		sc.AutoLoop = 1;
+		sc.UpdateAlways = 1;
 		sc.GraphRegion = 0;
 		sc.DrawZeros = 0;
 		sc.MaintainTradeStatisticsAndTradesData = 1;
@@ -1579,7 +1579,6 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		BalanceText.PrimaryColor = RGB(220, 220, 220);
 		BalanceText.LineWidth = 12;
 		BalanceText.DrawZeros = false;
-		InAccount.Name = "Trade account (blank = chart account)";
 		InManualOpening.Name = "Use manual opening balance";
 		InManualOpening.SetYesNo(false);
 		InOpeningValue.Name = "Manual opening balance";
@@ -1601,9 +1600,7 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 	if (last_update != 0 && now_sec >= last_update && now_sec - last_update < refresh)
 		return;
 	last_update = now_sec;
-	SCString account = InAccount.GetString();
-	if (account.GetLength() == 0)
-		account = sc.SelectedTradeAccount;
+	SCString account = sc.SelectedTradeAccount;
 	double opening = static_cast<double>(InOpeningValue.GetFloat());
 	if (InManualOpening.GetYesNo() == 0) {
 		n_ACSIL::s_TradeAccountDataFields fields;
