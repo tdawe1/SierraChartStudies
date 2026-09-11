@@ -1579,7 +1579,9 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		sc.GraphName = "Orion - Account Balance (Live)";
 		sc.StudyDescription =
 			"Live balance for accounts without EOD reconciliation (prop firms): "
-			"opening balance plus today's closed P/L plus open position P/L. "
+			"available funds reported by the trade service, with a computed "
+			"opening plus today's closed P/L plus open position P/L leg as "
+			"fallback and cross-check. "
 			"Sierra P/L figures exclude commissions: set the round-turn commission "
 			"to deduct an estimate. If the feed's account value already moves with "
 			"today's P/L, enable the opening-includes-day option so it is backed out "
@@ -1604,7 +1606,7 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		InRefreshSec.Name = "Refresh interval (seconds)";
 		InRefreshSec.SetInt(5);
 		InRefreshSec.SetIntLimits(1, 300);
-		InShowBroker.Name = "Show broker-reported balance";
+		InShowBroker.Name = "Show computed cross-check";
 		InShowBroker.SetYesNo(true);
 		InOpeningIncludesDay.Name = "Opening balance already includes today's closed P/L";
 		InOpeningIncludesDay.SetYesNo(false);
@@ -1625,12 +1627,14 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		return;
 	last_update = now_sec;
 	SCString account = sc.SelectedTradeAccount;
+	n_ACSIL::s_TradeAccountDataFields fields;
+	const bool have_fields = sc.GetTradeAccountData(fields, account) != 0;
+	// Rithmic keeps available funds correct intraday, so it leads. The
+	// computed opening + day + position leg is the fallback and cross-check.
+	const double available = have_fields ? fields.m_AvailableFundsForNewPositions : 0;
 	double opening = static_cast<double>(InOpeningValue.GetFloat());
-	if (InManualOpening.GetYesNo() == 0) {
-		n_ACSIL::s_TradeAccountDataFields fields;
-		if (sc.GetTradeAccountData(fields, account) != 0 && fields.m_AccountValue != 0)
-			opening = fields.m_AccountValue;
-	}
+	if (InManualOpening.GetYesNo() == 0 && have_fields && fields.m_AccountValue != 0)
+		opening = fields.m_AccountValue;
 	double daily_closed = 0;
 	n_ACSIL::s_TradeStatistics stats;
 	if (sc.GetTradeStatisticsForSymbolV2(n_ACSIL::STATS_TYPE_DAILY_ALL_TRADES, stats) != 0)
@@ -1656,7 +1660,7 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 	double opening_base = opening;
 	if (InOpeningIncludesDay.GetYesNo() != 0)
 		opening_base = opening - daily_closed;
-	const double live = opening_base + day_net + pos_net;
+	const double live = (available != 0) ? available : opening_base + day_net + pos_net;
 	auto draw_balance = [&](int line_number, int vpos, const SCString& line_text) {
 		s_UseTool tool;
 		tool.Clear();
@@ -1687,7 +1691,7 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 		if (InShowBroker.GetYesNo() != 0) {
 			SCString line3;
 			const double broker = sc.GetTradeServiceAccountBalanceForTradeAccount(account);
-			line3.Format("broker %.2f", broker);
+			line3.Format("calc %.2f", opening_base + day_net + pos_net);
 			SCString both;
 			both.Format("%s  %s", line2.GetChars(), line3.GetChars());
 			draw_balance(kBalanceDrawing + 1, 30, both);
