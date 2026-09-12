@@ -176,7 +176,8 @@ SCSFExport scsf_InitialBalanceStatistics(SCStudyInterfaceRef sc)
 	}
 
 	SCDateTimeMS LastBarDateTime = sc.BaseDateTimeIn[sc.ArraySize-1];
-	SCDateTimeMS FirstCalculationDate = LastBarDateTime.GetDate() - SCDateTime::DAYS(Input_NumberDaysToCalculate.GetInt() - 1);
+	// t_SCDate day counts: subtract whole days (SCDateTime has no DAYS() member).
+	const int FirstCalculationDate = LastBarDateTime.GetDate() - (Input_NumberDaysToCalculate.GetInt() - 1);
 	SCDateTimeMS CurrentBarDateTime = sc.BaseDateTimeIn[sc.Index];
 	SCDateTimeMS PrevBarDateTime;
 
@@ -248,7 +249,8 @@ SCSFExport scsf_InitialBalanceStatistics(SCStudyInterfaceRef sc)
 		// Check start of new intraday period
 		if (Intraday)
 		{
-			SCDateTimeMS IntradayEndDateTime = PeriodStartDateTime + SCDateTime::MINUTES(Input_NumberOfMinutes.GetInt()) - SCDateTime::MICROSECONDS(1);
+			// Durations are file-scope day-fraction constants (no MINUTES()/MICROSECONDS() members).
+			SCDateTimeMS IntradayEndDateTime = PeriodStartDateTime + MINUTES * Input_NumberOfMinutes.GetInt() - MICROSECONDS;
 
 			if (PrevBarDateTime < IntradayEndDateTime && CurrentBarDateTime > IntradayEndDateTime)
 			{
@@ -359,7 +361,7 @@ SCSFExport scsf_InitialBalanceStatistics(SCStudyInterfaceRef sc)
 			TargetTime.SetDateTime(CurrentBarDateTime.GetDate(), HMS_TIME(10, 30, 0));
 			
 			// Check if we're at exactly 10:30 EST (within the 1-minute window)
-			if (CurrentBarDateTime >= TargetTime && CurrentBarDateTime < TargetTime + SCDateTime::MINUTES(1))
+			if (CurrentBarDateTime >= TargetTime && CurrentBarDateTime < TargetTime + MINUTES)
 			{
 				// Get the close price of the current 1-minute candle
 				float CandleClose = sc.Close[sc.Index];

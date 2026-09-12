@@ -18,8 +18,14 @@
     "max_hold_bars": 0,
     "account_size": 50000,
     "risk_pct": 1.0,
-    "max_qty": 10,
+    "max_qty": 3,
     "daily_loss_limit": 1000,
-    "max_drawdown_limit": 2000
+    "max_drawdown_limit": 2000,
+    "profit_target": 3000,
+    "consistency_max_pct": 30.0,
+    "trade_windows": ["08:30-11:00", "13:30-15:00"],
+    "symbols": ["ES"],
+    "max_trades_per_day": 5,
+    "regime": "mean-reversion"
   }
 }

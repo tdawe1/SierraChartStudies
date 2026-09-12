@@ -33,10 +33,23 @@ def build_guide_params(a: dict) -> dict:
         "max_qty": 10,
         "daily_loss_limit": 0.0,
         "max_drawdown_limit": 0.0,
+        "regime": a.get("regime", "mean-reversion"),
     }
     if size_mode == "risk":
         engine.update({
             "qty": 1,
+            "account_size": float(a.get("account_size", 50000)),
+            "risk_pct": float(a.get("risk_pct", 1.0)),
+            "max_qty": int(a.get("max_qty", 10)),
+            "daily_loss_limit": float(a.get("daily_loss_limit", 1000)),
+            "max_drawdown_limit": float(a.get("max_drawdown_limit", 2000)),
+        })
+    if size_mode == "atr":
+        engine.update({
+            "qty": 1,
+            "stop_ticks": 0,  # required: one sizing rule per run
+            "size_by_atr": True,
+            "atr_risk_mult": float(a.get("atr_risk_mult", 1.0)),
             "account_size": float(a.get("account_size", 50000)),
             "risk_pct": float(a.get("risk_pct", 1.0)),
             "max_qty": int(a.get("max_qty", 10)),
@@ -70,12 +83,24 @@ def run_guide(out_path: str = "params.guide.json") -> dict:
         "tick_value": _ask("tick value $/tick/contract (ES 12.50, NQ 5.00)", "12.50"),
         "stop_ticks": _ask("stop ticks (0=off)", "12"),
         "target_ticks": _ask("target ticks (0=off)", "24"),
-        "size_mode": _ask("sizing: fixed or risk (prop % sizing + daily halt)", "fixed"),
+        "size_mode": _ask("sizing: fixed, risk, or atr (ATR % sizing, no stop)", "fixed"),
     }
+    a["regime"] = _ask("regime: mean-reversion, trend, breakout", "mean-reversion")
+    while a["regime"] not in ("mean-reversion", "trend", "breakout"):
+        print("pick exactly one: mean-reversion, trend, breakout (no mixed runs)")
+        a["regime"] = _ask("regime", "mean-reversion")
     if a["size_mode"] == "risk":
         a.update({
             "account_size": _ask("account size $", "50000"),
             "risk_pct": _ask("risk per trade %", "1.0"),
+            "daily_loss_limit": _ask("daily loss halt $", "1000"),
+            "max_drawdown_limit": _ask("max drawdown halt $", "2000"),
+        })
+    if a["size_mode"] == "atr":
+        a.update({
+            "account_size": _ask("account size $", "50000"),
+            "risk_pct": _ask("risk per trade %", "1.0"),
+            "atr_risk_mult": _ask("ATR multiple (size so mult x ATR = risk $)", "1.0"),
             "daily_loss_limit": _ask("daily loss halt $", "1000"),
             "max_drawdown_limit": _ask("max drawdown halt $", "2000"),
         })

@@ -37,7 +37,7 @@ def rank_key(r: dict) -> float:
 
 def leaderboard_text(runs: list[dict]) -> str:
     head = (f"{'rank':<4} {'run':<34} {'study':<14} {'dataset':<18} "
-            f"{'n':>3} {'win%':>4} {'total$':>9} {'oos$':>9} {'PF':>5} {'maxDD$':>8}")
+            f"{'n':>3} {'win%':>4} {'total$':>9} {'oos$':>9} {'PF':>5} {'maxDD$':>8} {'trials':>6}")
     lines = [head]
     for i, r in enumerate(sorted(runs, key=rank_key, reverse=True), 1):
         m = r["metrics"]
@@ -48,7 +48,8 @@ def leaderboard_text(runs: list[dict]) -> str:
             f"{m.get('trades', 0):>3} {_fmt(m, 'win_rate'):>4} "
             f"{m.get('total_pnl', 0):>9,.0f} "
             f"{(f'{oos:,.0f}' if oos != '' else '-'):>9} "
-            f"{m.get('profit_factor', 0):>5} {m.get('max_drawdown', 0):>8,.0f}")
+            f"{m.get('profit_factor', 0):>5} {m.get('max_drawdown', 0):>8,.0f} "
+            f"{(r.get('n_trials') if r.get('n_trials') is not None else '-'):>6}")
     return "\n".join(lines)
 
 
@@ -93,6 +94,7 @@ def build_html(runs: list[dict], title: str = "Study comparison") -> str:
     ordered = sorted(runs, key=rank_key, reverse=True)
     has_oos = any(r.get("oos_metrics") for r in runs)
     th = "".join(f"<th>{label}</th>" for _, label in COLS)
+    th += "<th>Trials</th>"
     if has_oos:
         th += "<th>IS $</th><th>OOS $</th>"
     rows = []
@@ -107,11 +109,13 @@ def build_html(runs: list[dict], title: str = "Study comparison") -> str:
         if r.get("is_metrics") and r.get("oos_metrics"):
             if r["is_metrics"].get("total_pnl", 0) > 0 >= r["oos_metrics"].get("total_pnl", 0):
                 flag = ' <b style="color:#b45309" title="profitable in-sample, flat/losing out-of-sample">&#9888;</b>'
+        trials = r.get("n_trials")
         rows.append(
             f"<tr><td>{i}</td><td><code>{html.escape(r['id'])}</code></td>"
             f"<td>{html.escape(r['study'])}</td>"
             f"<td>{html.escape(r['dataset'].split('/')[-1])}</td>"
-            f"<td>{html.escape(r.get('tag', ''))}</td>{tds}{flag}</tr>")
+            f"<td>{html.escape(r.get('tag', ''))}</td>{tds}"
+            f"<td>{trials if trials is not None else '-'}</td>{flag}</tr>")
     curves = [(f"{r['study']} {r.get('tag', '')} ({r['id'][-6:]})".strip(),
                [v for _, v in r.get("equity", [])]) for r in ordered]
     cards = []

@@ -18,6 +18,7 @@ price distance to USD: pnl = direction * (exit - entry) / tick_size
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 
@@ -39,10 +40,15 @@ class Bar:
     signal_long: int = 0
     signal_short: int = 0
     symbol: str = ""
+    atr: float = 0.0       # ATR14 in price units (0 = unknown, gates off-safe)
+    relvol: float = 1.0    # volume / 50-bar mean (1 = unknown/average)
 
     @property
     def delta(self) -> float:
         return self.askvol - self.bidvol
+
+
+REGIMES = ("mean-reversion", "trend", "breakout")
 
 
 @dataclass
@@ -74,6 +80,21 @@ class EngineConfig:
     trade_windows: tuple = ()  # ("08:30-11:00", ...) entries only inside; empty=off
     symbols: tuple = ()  # allowlist matched against Bar.symbol; empty=all
     max_trades_per_day: int = 0  # entries per day cap, 0=off
+    regime: str = ""  # required: exactly one of REGIMES; there is no "mixed"
+    size_by_atr: bool = False  # size from ATR instead of the stop (mutually exclusive)
+    atr_risk_mult: float = 1.0  # size so mult x ATR move = risk budget
+
+    def __post_init__(self) -> None:
+        if self.regime not in REGIMES:
+            raise ValueError(
+                f"engine.regime={self.regime!r} invalid: declare exactly one of "
+                f"{', '.join(REGIMES)} in the params file")
+        if (self.size_by_atr and self.stop_ticks > 0
+                and self.account_size > 0 and self.risk_pct > 0):
+            raise ValueError(
+                "one sizing rule per run: size_by_atr=1 needs stop_ticks=0 "
+                "(size from ATR; exits via target/time), or size_by_atr=0 "
+                "to size from the stop")
 
 
 @dataclass
@@ -89,6 +110,7 @@ class Trade:
     pnl: float = 0.0
     bars_held: int = 0
     qty: int = 1
+    regime: str = ""
 
 
 @dataclass
@@ -138,14 +160,29 @@ def _slip_price(price: float, direction: int, side: str, cfg: EngineConfig) -> f
     return price - slip * direction
 
 
-def _entry_qty(cfg: EngineConfig) -> int:
-    """Contracts such that a full stop loses ~risk_pct of account."""
+def _entry_qty(cfg: EngineConfig, atr_points: float = 0.0) -> int:
+    """Contracts for the risk budget. Exactly one rule runs: ATR-sized
+    when size_by_atr (stop_ticks then only places stops), else sized from
+    the stop. Zero/unknown ATR falls back to 1 contract, never divides."""
+    if cfg.size_by_atr:
+        if (cfg.account_size > 0 and cfg.risk_pct > 0 and cfg.tick_value > 0
+                and cfg.tick_size > 0 and atr_points > 0):
+            per_contract = (cfg.atr_risk_mult
+                            * (atr_points / cfg.tick_size * cfg.tick_value)
+                            + 2 * cfg.fee_per_side)
+            if per_contract > 0:
+                return max(1, min(cfg.max_qty,
+                                  int(cfg.account_size * cfg.risk_pct / 100.0
+                                      // per_contract)))
+        warnings.warn("size_by_atr with no ATR on this bar: qty 1")
+        return 1
     if (cfg.account_size > 0 and cfg.risk_pct > 0 and cfg.stop_ticks > 0
             and cfg.tick_value > 0):
         per_contract = cfg.stop_ticks * cfg.tick_value + 2 * cfg.fee_per_side
         if per_contract > 0:
             return max(1, min(cfg.max_qty,
-                              int(cfg.account_size * cfg.risk_pct / 100.0 // per_contract)))
+                              int(cfg.account_size * cfg.risk_pct / 100.0
+                                  // per_contract)))
     return cfg.qty
 
 
@@ -164,6 +201,7 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
     day_pnls: dict[str, float] = {}
     day_entries: dict[str, int] = {}
     target_hit_stamp = ""
+    saw_symbol_less = False  # symbols filter active but bars lack Symbol
     def close_pos(bar: Bar, price: float, reason: str) -> None:
         nonlocal cum, pos
         assert pos is not None
@@ -176,7 +214,7 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
             entry_stamp=pos.entry_stamp, entry_price=pos.entry_price,
             exit_idx=bar.idx, exit_stamp=bar.stamp, exit_price=price,
             exit_reason=reason, pnl=pnl, bars_held=bar.idx - pos.entry_idx,
-            qty=pos.qty,
+            qty=pos.qty, regime=cfg.regime,
         ))
         pos = None
         equity.append(cum)
@@ -200,7 +238,7 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
                 pos = Position(direction=pending, entry_idx=bar.idx,
                                entry_stamp=bar.stamp, entry_price=fill,
                                stop_price=stop, target_price=target,
-                               qty=_entry_qty(cfg))
+                               qty=_entry_qty(cfg, bar.atr))
                 day_entries[day] = day_entries.get(day, 0) + 1
             pending = 0
         elif blocked:
@@ -255,7 +293,11 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
             halted_day, pending, blocked = day, 0, True
 
         # 4. New signal -> pending (next-open) or immediate (close) entry.
-        allowed_symbol = not cfg.symbols or bar.symbol in cfg.symbols
+        # Symbol-less bars pass the allowlist: without a symbol we cannot
+        # prove a mismatch (documented; add a Symbol column to enforce).
+        if cfg.symbols and not bar.symbol:
+            saw_symbol_less = True
+        allowed_symbol = not cfg.symbols or not bar.symbol or bar.symbol in cfg.symbols
         under_day_cap = not cfg.max_trades_per_day or day_entries.get(day, 0) < cfg.max_trades_per_day
         if sig != 0 and pos is None and not pending and not blocked:
             if (sig > 0 and not cfg.allow_long) or (sig < 0 and not cfg.allow_short):
@@ -271,7 +313,7 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
                 pos = Position(direction=sig, entry_idx=bar.idx,
                                entry_stamp=bar.stamp, entry_price=fill,
                                stop_price=stop, target_price=target,
-                               qty=_entry_qty(cfg))
+                               qty=_entry_qty(cfg, bar.atr))
                 day_entries[day] = day_entries.get(day, 0) + 1
             else:
                 pending, pending_stamp, pending_idx = sig, bar.stamp, bar.idx
@@ -281,8 +323,13 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
         close_pos(bars[-1], _slip_price(bars[-1].close, pos.direction, "exit", cfg), "eod")
     if cur_day:
         day_pnls[cur_day] = day_pnls.get(cur_day, 0.0) + (cum - day_start)
+    if saw_symbol_less:
+        warnings.warn("symbols filter set but bars lack Symbol: "
+                      "symbol-less bars passed unfiltered")
     m = metrics(trades, equity)
     m.update(_rule_metrics(day_pnls, cfg, target_hit_stamp))
+    m["regime"] = cfg.regime
+    m["by_regime"] = {cfg.regime: metrics(trades, equity)}
     return {"trades": trades, "equity": equity, "stamps": curve_stamps,
             "metrics": m, "day_pnls": day_pnls}
 

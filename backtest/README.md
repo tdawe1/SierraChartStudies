@@ -33,10 +33,23 @@ python3 bt.py remote --host user@gpu-box --data ES-aug.csv --params params.repla
 ## Prop risk controls
 
 Set in the `engine` block (`params.risk.json` is a ready example):
-`account_size` + `risk_pct` size every trade off its stop distance
-(`max_qty` caps it); `daily_loss_limit` flattens and blocks new entries
-for the day; `max_drawdown_limit` stops the run. Reports show the sizing
-rule and a `risk halts` count, and `trades.csv` records per-trade qty.
+
+| Rule | Key | Behavior |
+|---|---|---|
+| Position sizing | `account_size` + `risk_pct` (`max_qty` cap) | contracts = floor(risk $ / stop $); per-trade `qty` in `trades.csv`. Exactly one rule per run: `size_by_atr: true` sizes from the fill bar's `ATR14` instead (contracts = floor(risk $ / (`atr_risk_mult` × ATR $ + fees)), unknown ATR → qty 1 with a warning) and requires `stop_ticks: 0`, otherwise the run is rejected |
+| Intraday drawdown | `daily_loss_limit` | flattens, blocks the day, resumes next day |
+| Trailing drawdown | `max_drawdown_limit` | vs peak marked equity; flattens and stops the run |
+| Profit target | `profit_target` | reports first-hit stamp (`target_hit`) |
+| Consistency | `consistency_max_pct` | best-day share of profit-day total; `consistency_ok` PASS/FAIL |
+| Trading hours | `trade_windows` (`session_start/end` folds in) | entries only inside windows |
+| Instruments | `symbols` | allowlist vs `Symbol` column (symbol-less bars pass; add the column to enforce) |
+| Pace | `max_trades_per_day` | entries-per-day cap |
+
+Reports show the sizing rule, `risk halts`, target and consistency lines.
+For live manual trading, the **Prop Risk Overlay** study
+(`PropRiskOverlay.cpp`: Remote Build, add to chart) draws the same
+guardrails from the broker account: day P/L vs limit, trailing room,
+target %, size calculator, session TRADE/STANDBY, red HALT lines.
 
 ## Journal time-of-day
 
@@ -70,9 +83,12 @@ runs that are profitable in-sample but flat/losing out-of-sample.
 | `run` | How did this study+params do on this data? |
 | `run --split frac:0.7` (or `--split "2026-07-01"`) | Does it hold up out-of-sample? |
 | `run` with `params.risk.json` | Does it survive prop daily-loss / drawdown rules? |
-| `sweep` | Which params are worth a closer look? (confirm winners with `run --split`) |
-| `walkforward --train N --test M` | Does it survive rolling regimes, not just one lucky split? |
+| `sweep` | Which params are worth a closer look? (confirm winners with `run --split`; max 200 combos per file — fail fast above; each combo is logged with its grid size as `n_trials`) |
+| `walkforward --train N --test M [--embargo-days D]` | Does it survive rolling regimes, not just one lucky split? (drops the first D days of each test window, default 1; `windows.csv` records dropped bars) |
 | `compare` | Which study wins, side by side, with equity curves? |
+| `promote --run <id>` | May a new signal ship? (OOS expectancy>0, ≥30 OOS trades, costs on, beats buy-and-hold; exit 1 otherwise) |
+| `verify --run <id>` | Does this logged run reproduce? (dataset hash + engine re-execution; exit 1 on mismatch) |
+| `matrix --data D --params P.json [--params Q.json] [--session NAME=HH:MM-HH:MM] [--out m.csv]` | Which strategy works when? (entries-only slices per strategy × session; <20-trade cells unranked; nothing logged) |
 | `remote --host … [--notify me@x]` | Same `run`, on a bigger box; emailed report on completion. |
 | `sessions --journal j.csv` | Which times of day suit you? |
 | `guide` | Builds a params file interactively for a first run. |
@@ -89,13 +105,21 @@ runs that are profitable in-sample but flat/losing out-of-sample.
 - `orion_bar` approximates the setup (stacked VAP absorption → bar-delta
   gate) for fast sweeps. `signal_replay` replays chart-exported signals
   exactly — assess any study, including ones with no offline port.
+- Live twin: `OrionExecutor.cpp` fires the same chart signals via
+  `sc.BuyEntry`/`sc.SellEntry` under the halt gate. To certify exactly
+  what it will trade, wire the trigger subgraphs into the exporter's
+  Signal inputs and `run` the export with `signal_replay`.
 
-## Plug in another study
+## Regimes and the signal budget
 
-Exact mode needs no code: export its signals, replay them. For a native
-offline strategy, add `my_study(bars, **kw) -> list[int]` in
-`strategies.py` (+1/−1/0 per closed bar, past data only) and register it
-in `STRATEGIES`.
+Every run declares exactly one `engine.regime`: `mean-reversion`, `trend`,
+or `breakout` — there is no `mixed`. Trades inherit the run's regime and
+`summary.json` carries a `by_regime` block, so strategies are compared
+across runs, never blended into one equity curve. A new signal, strategy
+function, or exporter signal ships only after `promote --run <id>` passes
+on a walk-forward or `--split` run; tag the shipped params
+`promoted:<run-id>`.
+
 
 ## Output schemas (stable)
 
@@ -104,11 +128,20 @@ can parse them (`pandas.read_csv`, `jq`, a phone browser):
 
 | File | Shape | Human surface |
 |---|---|---|
-| `trades.csv` | `dir,entry_idx,entry_time,entry,exit_idx,exit_time,exit,reason,pnl,bars_held,qty` | spreadsheet (desktop) |
+| `trades.csv` | `dir,entry_idx,entry_time,entry,exit_idx,exit_time,exit,reason,pnl,bars_held,qty,regime` | spreadsheet (desktop) |
 | `equity.csv` | `stamp,equity` | chart it anywhere |
-| `summary.json` | `{params, metrics, is_metrics?, oos_metrics?}`; metrics keys: `trades,wins,losses,win_rate,total_pnl,avg_win,avg_loss,profit_factor,expectancy,max_drawdown,calmar,sharpe_trade,max_consec_losses,avg_bars_held,risk_halts` | `jq .metrics` |
+| `summary.json` | `{params, metrics, is_metrics?, oos_metrics?}`; metrics keys: `trades,wins,losses,win_rate,total_pnl,avg_win,avg_loss,profit_factor,expectancy,max_drawdown,calmar,sharpe_trade,max_consec_losses,avg_bars_held,risk_halts,target_hit,target_hit_stamp,best_day,best_day_pnl,best_day_pct,consistency_ok,regime,by_regime` | `jq .metrics` |
 | `report.txt` | same numbers, aligned text | terminal, email body |
 | `report.html` (`compare`) | top-5 cards + SVG equity + full leaderboard; viewport + responsive CSS, table scrolls horizontally | desktop and mobile browsers |
+
+Input CSVs accept an optional `Symbol` column (drives the `symbols` rule).
+
+The store (`results.db`) is append-only: each run logs code git sha
+(+`-dirty`), dataset sha256/row count/stamp range, and the trial count
+that produced its params (`n_trials`; sweeps record their grid size), and
+the artifact dir keeps its own `params.json` copy. Old rows without
+hashes still verify — the hash check is skipped with a note, and newer
+metric keys are reported as "added since" rather than mismatches.
 
 ## Files
 

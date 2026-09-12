@@ -26,7 +26,8 @@
     "allow_short": true,
     "exit_on_opposite": true,
     "reverse_on_opposite": false,
-    "max_hold_bars": 0
+    "max_hold_bars": 0,
+    "regime": "mean-reversion"
   },
   "grid": {
     "setup_min_delta": [100, 200, 300],

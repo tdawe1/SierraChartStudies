@@ -3,7 +3,10 @@
 Accepted input (case-insensitive headers, extra columns ignored):
 
     DateTime, Open, High, Low, Close [, Volume, BidVolume, AskVolume,
-      MaxDelta, MinDelta, SetupLong, SetupShort, SignalLong, SignalShort]
+      MaxDelta, MinDelta, SetupLong, SetupShort, SignalLong, SignalShort,
+      ATR14, RelVol50, BidClose, AskClose]
+BidClose/AskClose (BacktestExporter v2) are carried as context only;
+the engines never fill off them (see exporter/BacktestExporter.cpp).
 
 DateTime may be "YYYY-MM-DD HH:MM" or with seconds. Sierra Chart's
 "Export Bar Data" writes Date/Time in separate columns or epoch; use the
@@ -17,8 +20,8 @@ template below -- export, then rename to this contract:
       (intra-bar max/min of ask-bid; 0 if unwired)
     SetupLong/SetupShort, SignalLong/SignalShort = chart-exported study
       markers (1/0). See exporter/BacktestExporter.cpp.
-
-Missing optional columns default to 0. Rows with bad prices are skipped.
+Missing optional columns default to 0 (ATR14) and 1.0 (RelVol50, so
+un-gated runs behave). Rows with bad prices are skipped.
 """
 
 import csv
@@ -43,7 +46,8 @@ _ALIASES = {
     "setupshort": "setup_short", "setup_short": "setup_short",
     "signallong": "signal_long", "signal_long": "signal_long",
     "signalshort": "signal_short", "signal_short": "signal_short",
-    "symbol": "symbol", "instrument": "symbol", "ticker": "symbol",
+    "atr": "atr", "atr14": "atr",
+    "relvol": "relvol", "relvol50": "relvol", "rel_vol": "relvol",
 }
 
 
@@ -89,6 +93,8 @@ def load_csv(path: str) -> list[Bar]:
                 signal_long=int(_num(row, "signal_long") > 0),
                 signal_short=int(_num(row, "signal_short") > 0),
                 symbol=(row.get("symbol", "") or "").strip(),
+                atr=_num(row, "atr"),
+                relvol=_num(row, "relvol") if "relvol" in row else 1.0,
             ))
             idx += 1
     if not bars:

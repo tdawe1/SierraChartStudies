@@ -93,6 +93,21 @@ def extreme_broken(high: float, low: float, armed_extreme: float,
     return low < armed_extreme - pad
 
 
+def entry_gates_pass(b: Bar, tick_size: float, require_relvol_above: float,
+                     block_atr_above_mult: float) -> bool:
+    """Volatility/volume entry gates. Zeros = off (always passes).
+
+    require_relvol_above: minimum RelVol50 (1.0 = average volume).
+    block_atr_above_mult: ATR ceiling in multiples of tick size.
+    """
+    if require_relvol_above > 0 and b.relvol < require_relvol_above:
+        return False
+    if (block_atr_above_mult > 0 and tick_size > 0
+            and (b.atr / tick_size) > block_atr_above_mult):
+        return False
+    return True
+
+
 # --- strategies -----------------------------------------------------------
 
 def signal_replay(bars: list[Bar], **kw) -> list[int]:
@@ -122,6 +137,8 @@ def orion_bar(bars: list[Bar],
               session_enabled: bool = False,
               session_start: str = "08:30",
               session_end: str = "15:00",
+              require_relvol_above: float = 0.0,
+              block_atr_above_mult: float = 0.0,
               **kw) -> list[int]:
     """Approximate Orion trigger on bar-level columns.
 
@@ -151,8 +168,17 @@ def orion_bar(bars: list[Bar],
                     armed_climax if armed_climax else extreme, delta,
                     is_short, rebound_mode, rebound_abs, rebound_pct):
                 if (armed_dir > 0 and allow_long) or (armed_dir < 0 and allow_short):
-                    sigs[i] = armed_dir
-                    armed_dir, armed_bar = 0, -1
+                    if entry_gates_pass(b, tick_size, require_relvol_above,
+                                        block_atr_above_mult):
+                        sigs[i] = armed_dir
+                        armed_dir, armed_bar = 0, -1
+                        continue
+                    # gate blocked: no signal, but keep the arm alive and
+                    # track the climax like a non-trigger bar
+                    if is_short and extreme > armed_climax:
+                        armed_climax = extreme
+                    elif not is_short and extreme < armed_climax:
+                        armed_climax = extreme
                     continue
             if extreme_broken(b.high, b.low, armed_extreme, tick_size,
                               invalidate_ticks, is_short):

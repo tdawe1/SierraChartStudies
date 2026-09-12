@@ -5,11 +5,13 @@
 - `~/SierraChartStudies` — study sources. Origin `tdawe1/SierraChartStudies` (fork),
   upstream `TradesTrevor/SierraChartStudies`. Open PRs in the fork; a cross-fork
   PR to upstream was rejected ("no commits between"), so retarget from the PR page.
-- `~/SierraChart` (separate checkout = live Sierra Chart data folder) — copy the
-  built `.cpp` there so Remote Build can compile it. Do NOT commit build outputs
-  there; it already carries many untracked DLLs/CHTs. `TraderOracle.cpp` there owns
-  the unrelated **Olympus** study — Orion work never touches it (they were confused
-  once; Olympus ≠ Orion).
+- Live Sierra install is Wine: `~/.wine/drive_c/SierraChart/`, sources in
+  `ACS_Source/` there. **Deploy with `python3 bundle.py --install`** (env
+  `SC_ACS_SOURCE` overrides the target): bundles defaults to `AllStudies.cpp`
+  and copies all 8 sources + bundle, so Remote Build sees fresh files.
+  `~/SierraChart/` is a separate staging checkout, not the build folder.
+  `TraderOracle.cpp` there owns the unrelated **Olympus** study — Orion work
+  never touches it (they were confused once; Olympus ≠ Orion).
 
 ## Orion (`Orion.cpp`)
 
@@ -41,7 +43,7 @@
   with `g++ -std=c++17 -fsyntax-only -I/tmp/orion_check Orion.cpp`. Stub must define
   `SCDLLName(x)` *with* trailing semicolon. Rebuild/refresh the stub if new ACSIL
   APIs are used.
-- After edits: run core tests, syntax-check, copy `Orion.cpp` to `~/SierraChart/`,
+- After edits: run core tests, syntax-check, `python3 bundle.py --install`,
   update README + CHANGELOG (dated `### Orion` section).
 
 ## Backtesting

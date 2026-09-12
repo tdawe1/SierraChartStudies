@@ -41,10 +41,20 @@ class TestSplit(unittest.TestCase):
         self.assertEqual((len(isb), len(oos)), (1, 0))
 
 
+class TestConfigWiring(unittest.TestCase):
+    def test_make_cfg_passes_symbols(self):
+        cfg = bt._make_cfg({"engine": {"regime": "mean-reversion",
+                                       "symbols": ["ES"]}})
+        self.assertEqual(cfg.symbols, ("ES",))
+
+    def test_make_cfg_requires_regime(self):
+        with self.assertRaises(ValueError):
+            bt._make_cfg({"engine": {}})
+
 class TestStore(unittest.TestCase):
     def test_round_trip(self):
-        con = sqlite3.connect(":memory:")
-        con.execute(__import__("store", fromlist=["x"]).SCHEMA)
+        import store
+        con = store.connect(":memory:")
         rid = make_id("s", "d", {"a": 1})
         log_run(con, rid, "s", "d", "t", "", {"a": 1},
                 {"total_pnl": 5.0}, {"total_pnl": 9.0}, None, artifact_dir="/x")
@@ -143,6 +153,147 @@ class TestGuideNotify(unittest.TestCase):
         cmds = run_remote("h", "b.tgz", dry_run=True, notify="a@b.c")
         self.assertTrue(any(c.startswith("email a@b.c") for c in cmds))
 
+
+class TestPromote(unittest.TestCase):
+    def test_unknown_run_exits(self):
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(SystemExit):
+                bt.do_promote(os.path.join(td, "r.db"), "no-such-run")
+
+    def test_no_oos_evidence_fails(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "r.db")
+            res = bt.do_run(os.path.join(here, "sample_data.csv"),
+                            os.path.join(here, "params.replay.json"),
+                            os.path.join(td, "out"), quiet=True, tag="t",
+                            db=db, results_dir=os.path.join(td, "res"))
+            self.assertFalse(bt.do_promote(db, res["run_id"]))
+
+    def test_walkforward_oos_path_runs(self):
+        # gate evaluates the walkforward aggregate; sample data is tiny so
+        # the verdict itself is not asserted, only that the path executes
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "r.db")
+            res = bt.do_walkforward(
+                os.path.join(here, "sample_data.csv"),
+                os.path.join(here, "params.replay.json"),
+                os.path.join(td, "wf"), train=4, test=4, step=4,
+                db=db, results_dir=os.path.join(td, "res"))
+            self.assertIsInstance(bt.do_promote(db, res["run_id"]), bool)
+
+class TestAudit(unittest.TestCase):
+    def test_old_db_migrates(self):
+        import store
+        with tempfile.TemporaryDirectory() as td:
+            db = os.path.join(td, "old.db")
+            raw = sqlite3.connect(db)
+            raw.execute(store.SCHEMA)  # pre-audit schema, no ALTERs
+            raw.commit()
+            raw.close()
+            con = store.connect(db)
+            cols = {r[1] for r in con.execute("PRAGMA table_info(runs)")}
+            con.close()
+        self.assertIn("code_sha", cols)
+        self.assertIn("n_trials", cols)
+
+    def test_append_only_not_replace(self):
+        import store
+        con = sqlite3.connect(":memory:")
+        con.execute(store.SCHEMA)
+        con.commit()
+        # simulate the migrated schema the same way connect() does
+        for name, typ in store.AUDIT_COLS:
+            con.execute(f"ALTER TABLE runs ADD COLUMN {name} {typ}")
+        store.log_run(con, "r1", "s", "d", "t", "", {"a": 1},
+                      {"total_pnl": 5.0}, None, None, artifact_dir="/x")
+        with self.assertRaises(sqlite3.IntegrityError):
+            store.log_run(con, "r1", "s", "d", "t", "", {"a": 1},
+                          {"total_pnl": 6.0}, None, None, artifact_dir="/y")
+        con.close()
+
+    def test_verify_passes_and_detects_tamper(self):
+        import shutil
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as td:
+            data = os.path.join(td, "es.csv")
+            shutil.copy(os.path.join(here, "sample_data.csv"), data)
+            db = os.path.join(td, "r.db")
+            res = bt.do_run(data, os.path.join(here, "params.replay.json"),
+                            os.path.join(td, "out"), quiet=True, tag="t",
+                            db=db, results_dir=os.path.join(td, "res"))
+            self.assertTrue(bt.do_verify(db, res["run_id"]))
+            with open(data, "a") as f:  # tamper: append a bar
+                f.write("2026-08-04 09:00,100,101,99,100,500,200,300,0,0,0,0\n")
+            self.assertFalse(bt.do_verify(db, res["run_id"]))
+
+class TestMatrix(unittest.TestCase):
+    def test_cells_and_n_low(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as td:
+            out = os.path.join(td, "matrix.csv")
+            cells = bt.do_matrix(
+                os.path.join(here, "sample_data.csv"),
+                [os.path.join(here, "params.replay.json"),
+                 os.path.join(here, "params.orion.json")],
+                out, sessions=[("morning", "08:30-11:00"),
+                               ("midday", "11:00-13:30")])
+            self.assertEqual(len(cells), 4)
+            # tiny sample: every cell is n_low and unranked
+            self.assertTrue(all(c["n_low"] for c in cells))
+            self.assertTrue(all("rank" not in c for c in cells))
+            self.assertTrue(os.path.exists(out))
+            self.assertEqual({c["regime"] for c in cells}, {"mean-reversion"})
+
+class TestAntiOverfit(unittest.TestCase):
+    def test_sweep_budget_fails_fast(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as td:
+            pp = os.path.join(td, "big.json")
+            with open(pp, "w") as f:
+                json.dump({"strategy": "orion_bar", "strategy_params": {},
+                           "engine": {"regime": "mean-reversion"},
+                           "grid": {"setup_min_delta": list(range(201))}}, f)
+            with self.assertRaises(SystemExit):
+                bt.do_sweep(os.path.join(here, "sample_data.csv"), pp,
+                            os.path.join(td, "sw"))
+
+    def test_embargo_cut_purges_head_days(self):
+        from engine import Bar
+        bars = [Bar(idx=i, stamp=f"2026-08-0{3 + (i // 2)} 09:00")
+                for i in range(6)]
+        self.assertEqual(bt._embargo_cut(bars, 0, 6, 1), 2)
+        self.assertEqual(bt._embargo_cut(bars, 0, 6, 0), 0)
+        self.assertEqual(bt._embargo_cut(bars, 0, 6, 9), 6)
+
+    def test_walkforward_embargo_runs(self):
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with tempfile.TemporaryDirectory() as td:
+            res = bt.do_walkforward(
+                os.path.join(here, "sample_data.csv"),
+                os.path.join(here, "params.replay.json"),
+                os.path.join(td, "wf"), train=4, test=4, step=4,
+                embargo_days=1, log=False)
+            self.assertTrue(all("dropped" in w for w in res["windows"]))
+            res0 = bt.do_walkforward(
+                os.path.join(here, "sample_data.csv"),
+                os.path.join(here, "params.replay.json"),
+                os.path.join(td, "wf0"), train=4, test=4, step=4,
+                embargo_days=0, log=False)
+            self.assertGreaterEqual(len(res0["trades"]),
+                                    len(res["trades"]))
+
+    def test_compare_shows_trials(self):
+        from report import build_html, leaderboard_text
+        runs = [{"id": "a", "study": "s", "dataset": "d.csv", "tag": "",
+                 "n_trials": 200, "metrics": {"trades": 1, "win_rate": 1.0,
+                 "total_pnl": 5.0, "profit_factor": 0.0, "max_drawdown": 0.0},
+                 "is_metrics": None, "oos_metrics": None, "equity": []}]
+        text = leaderboard_text(runs)
+        self.assertIn("trials", text)
+        self.assertIn("200", text)
+        self.assertIn("<th>Trials</th>", build_html(runs))
 
 if __name__ == "__main__":
     unittest.main()
