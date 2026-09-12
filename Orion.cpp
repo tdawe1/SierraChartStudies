@@ -604,7 +604,9 @@ inline int merge_extreme_vap(
 	the bar's ask-bid delta. Study ID 0 falls back to Ask-Bid, with
 	intra-bar max/min on the forming bar.
 
-	Alerts: 1 setup short, 2 setup long, 3 trigger.
+Alerts: setup short, setup long, and trigger, each with its own on/off
+toggle and alert number (defaults 1, 2, 3). The setup master toggle
+stays off by default; turn it on to arm the per-direction alerts.
 
 	INSTALL
 	-------
@@ -625,6 +627,8 @@ SCDLLName("Orion")
 namespace {
 
 constexpr int kStatusDrawing = 202609041;
+constexpr int kDataDrawing1 = 202609042;
+constexpr int kDataDrawing2 = 202609043;
 
 
 
@@ -868,6 +872,12 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 	SCInputRef InVersion = sc.Input[36];
 	SCInputRef InShowStatus = sc.Input[37];
 	SCInputRef InShowZone = sc.Input[38];
+	SCInputRef InSetupLongAlert = sc.Input[39];
+	SCInputRef InSetupShortAlert = sc.Input[40];
+	SCInputRef InSetupLongAlertNum = sc.Input[41];
+	SCInputRef InSetupShortAlertNum = sc.Input[42];
+	SCInputRef InTriggerAlertNum = sc.Input[43];
+	SCInputRef InShowData = sc.Input[44];
 
 	if (sc.SetDefaults) {
 		sc.GraphName = "Orion - Absorption Climax";
@@ -1013,6 +1023,24 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 		InSetupAlert.Name = "[Display] Alert on setup";
 		InSetupAlert.SetYesNo(false);
 		InSetupAlert.DisplayOrder = order++;
+		InSetupLongAlert.Name = "[Alerts] Alert on long setup";
+		InSetupLongAlert.SetYesNo(true);
+		InSetupLongAlert.DisplayOrder = order++;
+		InSetupShortAlert.Name = "[Alerts] Alert on short setup";
+		InSetupShortAlert.SetYesNo(true);
+		InSetupShortAlert.DisplayOrder = order++;
+		InSetupLongAlertNum.Name = "[Alerts] Long setup alert number";
+		InSetupLongAlertNum.SetInt(2);
+		InSetupLongAlertNum.SetIntLimits(1, 99);
+		InSetupLongAlertNum.DisplayOrder = order++;
+		InSetupShortAlertNum.Name = "[Alerts] Short setup alert number";
+		InSetupShortAlertNum.SetInt(1);
+		InSetupShortAlertNum.SetIntLimits(1, 99);
+		InSetupShortAlertNum.DisplayOrder = order++;
+		InTriggerAlertNum.Name = "[Alerts] Trigger alert number";
+		InTriggerAlertNum.SetInt(3);
+		InTriggerAlertNum.SetIntLimits(1, 99);
+		InTriggerAlertNum.DisplayOrder = order++;
 
 		InEnableTrigger.Name = "[Trigger] Enable climax trigger";
 		InEnableTrigger.SetYesNo(true);
@@ -1099,6 +1127,9 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 		InShowZone.Name = "[Display] Show absorption zone";
 		InShowZone.SetYesNo(true);
 		InShowZone.DisplayOrder = order++;
+		InShowData.Name = "[Display] Show data overlay";
+		InShowData.SetYesNo(true);
+		InShowData.DisplayOrder = order++;
 
 		InVersion.Name = "Do not change (study version)";
 		InVersion.SetInt(3);
@@ -1123,6 +1154,8 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 	int& arm_stacked = sc.GetPersistentInt(7);
 	int& arm_scale = sc.GetPersistentInt(8);
 	int& mixed_delta_logged = sc.GetPersistentInt(9);
+	int& setup_alert_key = sc.GetPersistentInt(10);
+	int& trigger_alert_key = sc.GetPersistentInt(11);
 
 	float& armed_px = sc.GetPersistentFloat(1);
 	float& climax_val = sc.GetPersistentFloat(2);
@@ -1148,6 +1181,8 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 		disarm();
 		fbar_index = -1;
 		triggered_bar = -1;
+		setup_alert_key = -1;
+		trigger_alert_key = -1;
 		vap_truncated_logged = 0;
 		mixed_delta_logged = 0;
 		fbar_max = 0;
@@ -1318,13 +1353,16 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 				TriggerLong[index] = static_cast<float>(sc.Low[index] - trig_off);
 			triggered_bar = index;
 			did_trigger = true;
-			if (InTriggerAlert.GetYesNo() && index >= last_index - 1 && !sc.IsFullRecalculation) {
+			const int trigger_key = index * 2 + (is_short ? 1 : 0);
+			if (InTriggerAlert.GetYesNo() && index >= last_index - 1 && !sc.IsFullRecalculation
+				&& trigger_alert_key != trigger_key) {
 				SCString msg;
+				trigger_alert_key = trigger_key;
 				msg.Format(
 					"ORION TRIGGER %s climax=%.0f delta=%.0f stack=%d scale=%d",
 					is_short ? "SHORT" : "LONG",
 					climax_val, bar_delta, arm_stacked, arm_scale);
-				sc.SetAlert(3, index, msg);
+				sc.SetAlert(InTriggerAlertNum.GetInt(), index, msg);
 				if (InLogSignals.GetYesNo())
 					sc.AddMessageToLog(msg, 0);
 			}
@@ -1426,13 +1464,17 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 				ZoneHigh[index] = zhi;
 				ZoneLow[index] = zlo;
 			}
+			const int setup_key = index * 2 + (is_short ? 1 : 0);
 			if (new_arm && InSetupAlert.GetYesNo()
-				&& index >= last_index - 1 && !sc.IsFullRecalculation) {
+				&& (is_short ? InSetupShortAlert.GetYesNo() : InSetupLongAlert.GetYesNo())
+				&& index >= last_index - 1 && !sc.IsFullRecalculation
+				&& setup_alert_key != setup_key) {
 				SCString msg;
+				setup_alert_key = setup_key;
 				msg.Format(
 					"ORION SETUP %s stack=%d scale=%d",
 					is_short ? "SHORT" : "LONG", arm_stacked, arm_scale);
-				sc.SetAlert(is_short ? 1 : 2, index, msg);
+				sc.SetAlert(is_short ? InSetupShortAlertNum.GetInt() : InSetupLongAlertNum.GetInt(), index, msg);
 				if (InLogSignals.GetYesNo())
 					sc.AddMessageToLog(msg, 0);
 			}
@@ -1440,9 +1482,34 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 	}
 
 	if (index == last_index) {
-		if (!InShowStatus.GetYesNo()) {
+		const bool show_status = InShowStatus.GetYesNo() != 0;
+		const bool show_data = show_status && InShowData.GetYesNo() != 0;
+		if (!show_status)
 			sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, kStatusDrawing);
-		} else {
+		if (!show_data) {
+			sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, kDataDrawing1);
+			sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, kDataDrawing2);
+		}
+		auto draw_line = [&](int line_number, int vpos, const SCString& line_text) {
+			s_UseTool tool;
+			tool.Clear();
+			tool.ChartNumber = sc.ChartNumber;
+			tool.DrawingType = DRAWING_TEXT;
+			tool.LineNumber = line_number;
+			tool.AddMethod = UTAM_ADD_OR_ADJUST;
+			tool.Region = sc.GraphRegion;
+			tool.BeginDateTime = 1;
+			tool.BeginValue = vpos;
+			tool.UseRelativeVerticalValues = 1;
+			tool.Color = Status.PrimaryColor;
+			tool.FontSize = Status.LineWidth > 0 ? Status.LineWidth : 12;
+			tool.FontBold = 1;
+			tool.Text = line_text;
+			tool.AddAsUserDrawnDrawing = 0;
+			tool.DrawUnderneathMainGraph = 0;
+			sc.UseTool(tool);
+		};
+		if (show_status) {
 			SCString text;
 			if (armed_dir != 0) {
 				const int age = index - armed_bar;
@@ -1455,24 +1522,185 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 			} else {
 				text = "ORION";
 			}
-			s_UseTool tool;
-			tool.Clear();
-			tool.ChartNumber = sc.ChartNumber;
-			tool.DrawingType = DRAWING_TEXT;
-			tool.LineNumber = kStatusDrawing;
-			tool.AddMethod = UTAM_ADD_OR_ADJUST;
-			tool.Region = sc.GraphRegion;
-			tool.BeginDateTime = 1;
-			tool.BeginValue = 6;
-			tool.UseRelativeVerticalValues = 1;
-			tool.Color = Status.PrimaryColor;
-			tool.FontSize = Status.LineWidth > 0 ? Status.LineWidth : 12;
-			tool.FontBold = 1;
-			tool.Text = text;
-			tool.AddAsUserDrawnDrawing = 0;
-			tool.DrawUnderneathMainGraph = 0;
-			sc.UseTool(tool);
+			draw_line(kStatusDrawing, 6, text);
 		}
+		if (show_data) {
+			SCString data;
+			const double disp_ma = VolumeMA(sc, index, InVolumeMALen.GetInt());
+			data.Format(
+				"ORION DATA d=%+.0f V=%.0f (MA %.0f) minV=%.0f dThr=%.0f %s %s",
+				bar_delta, sc.Volume[index], disp_ma, min_vol, delta_thresh,
+				vol_ok ? "volOK" : "LOWVOL",
+				session_ok ? "sessOK" : "OFFSESS");
+			draw_line(kDataDrawing1, 12, data);
+			SCString arm;
+			if (armed_dir != 0) {
+				const bool is_short = armed_dir < 0;
+				double need = rebound_abs;
+				if (InReboundMode.GetIndex() == 1)
+					need = std::fabs(static_cast<double>(climax_val)) * (InReboundPct.GetInt() / 100.0);
+				const double target = static_cast<double>(climax_val) + (is_short ? -need : need);
+				if (zone_high > 0 && zone_low > 0) {
+					arm.Format(
+						"ARM %s @ %.2f zone %.2f-%.2f climax %.0f need %s%.0f",
+						is_short ? "SHORT" : "LONG",
+						static_cast<double>(armed_px), static_cast<double>(zone_low),
+						static_cast<double>(zone_high), static_cast<double>(climax_val),
+						is_short ? "<=" : ">=", target);
+				} else {
+					arm.Format(
+						"ARM %s @ %.2f climax %.0f need %s%.0f",
+						is_short ? "SHORT" : "LONG",
+						static_cast<double>(armed_px), static_cast<double>(climax_val),
+						is_short ? "<=" : ">=", target);
+				}
+			} else {
+				arm.Format(
+					"SCAN swingH %d swingL %d setup %s",
+					IsLookbackSwing(sc, index, swing_bars, true) ? 1 : 0,
+					IsLookbackSwing(sc, index, swing_bars, false) ? 1 : 0,
+					want_setup ? "on" : "off");
+			}
+			draw_line(kDataDrawing2, 18, arm);
+		}
+	}
+}
+constexpr int kBalanceDrawing = 202609044;
+SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
+	SCSubgraphRef BalanceText = sc.Subgraph[0];
+	SCInputRef InManualOpening = sc.Input[0];
+	SCInputRef InOpeningValue = sc.Input[1];
+	SCInputRef InShowParts = sc.Input[2];
+	SCInputRef InRefreshSec = sc.Input[3];
+	SCInputRef InShowBroker = sc.Input[4];
+	SCInputRef InOpeningIncludesDay = sc.Input[5];
+	SCInputRef InRTCommission = sc.Input[6];
+	SCInputRef InClosedRoundTurns = sc.Input[7];
+	if (sc.SetDefaults) {
+		sc.GraphName = "Orion - Account Balance (Live)";
+		sc.StudyDescription =
+			"Live balance for accounts without EOD reconciliation (prop firms): "
+			"available funds reported by the trade service, with a computed "
+			"opening plus today's closed P/L plus open position P/L leg as "
+			"fallback and cross-check. "
+			"Sierra P/L figures exclude commissions: set the round-turn commission "
+			"to deduct an estimate. If the feed's account value already moves with "
+			"today's P/L, enable the opening-includes-day option so it is backed out "
+			"instead of double-counted. "
+			"All figures use the chart trade account; P/L covers the chart symbol.";
+		sc.AutoLoop = 1;
+		sc.UpdateAlways = 1;
+		sc.GraphRegion = 0;
+		sc.DrawZeros = 0;
+		sc.MaintainTradeStatisticsAndTradesData = 1;
+		BalanceText.Name = "Balance Text";
+		BalanceText.DrawStyle = DRAWSTYLE_IGNORE;
+		BalanceText.PrimaryColor = RGB(220, 220, 220);
+		BalanceText.LineWidth = 12;
+		BalanceText.DrawZeros = false;
+		InManualOpening.Name = "Use manual opening balance";
+		InManualOpening.SetYesNo(false);
+		InOpeningValue.Name = "Manual opening balance";
+		InOpeningValue.SetFloat(0);
+		InShowParts.Name = "Show balance components";
+		InShowParts.SetYesNo(true);
+		InRefreshSec.Name = "Refresh interval (seconds)";
+		InRefreshSec.SetInt(5);
+		InRefreshSec.SetIntLimits(1, 300);
+		InShowBroker.Name = "Show computed cross-check";
+		InShowBroker.SetYesNo(true);
+		InOpeningIncludesDay.Name = "Opening balance already includes today's closed P/L";
+		InOpeningIncludesDay.SetYesNo(false);
+		InRTCommission.Name = "Round-turn commission per contract (0 disables)";
+		InRTCommission.SetFloat(0);
+		InRTCommission.SetFloatLimits(0, 1000);
+		InClosedRoundTurns.Name = "Closed round-turn contracts today (for commission estimate)";
+		InClosedRoundTurns.SetInt(0);
+		InClosedRoundTurns.SetIntLimits(0, 1000000);
+		return;
+	}
+	if (sc.Index != sc.ArraySize - 1)
+		return;
+	int& last_update = sc.GetPersistentInt(0);
+	const int now_sec = sc.CurrentSystemDateTime.GetTimeInSeconds();
+	const int refresh = InRefreshSec.GetInt() < 1 ? 1 : InRefreshSec.GetInt();
+	if (last_update != 0 && now_sec >= last_update && now_sec - last_update < refresh)
+		return;
+	last_update = now_sec;
+	SCString account = sc.SelectedTradeAccount;
+	n_ACSIL::s_TradeAccountDataFields fields;
+	const bool have_fields = sc.GetTradeAccountData(fields, account) != 0;
+	// Rithmic keeps available funds correct intraday, so it leads. The
+	// computed opening + day + position leg is the fallback and cross-check.
+	const double available = have_fields ? fields.m_AvailableFundsForNewPositions : 0;
+	double opening = static_cast<double>(InOpeningValue.GetFloat());
+	if (InManualOpening.GetYesNo() == 0 && have_fields && fields.m_AccountValue != 0)
+		opening = fields.m_AccountValue;
+	double daily_closed = 0;
+	n_ACSIL::s_TradeStatistics stats;
+	if (sc.GetTradeStatisticsForSymbolV2(n_ACSIL::STATS_TYPE_DAILY_ALL_TRADES, stats) != 0)
+		daily_closed = stats.ClosedTradesProfitLoss;
+	double open_pl = 0;
+	double position_qty = 0;
+	s_SCPositionData pos;
+	if (sc.GetTradePosition(pos) == 1) {
+		open_pl = pos.OpenProfitLoss;
+		position_qty = pos.PositionQuantity;
+	}
+	// Sierra P/L figures exclude commissions: deduct the Sierra-convention
+	// estimate (round-turn rate x qty / 2 for the open leg, rate x closed
+	// round turns for the day). All zeros by default = previous behavior.
+	const double rt_rate = static_cast<double>(InRTCommission.GetFloat());
+	const double open_comm = rt_rate * fabs(position_qty) / 2.0;
+	const double closed_comm =
+		rt_rate * static_cast<double>(InClosedRoundTurns.GetInt());
+	const double day_net = daily_closed - closed_comm;
+	const double pos_net = open_pl - open_comm;
+	// Some feeds roll today's closed P/L into the account value intraday;
+	// back it out so it is not counted twice.
+	double opening_base = opening;
+	if (InOpeningIncludesDay.GetYesNo() != 0)
+		opening_base = opening - daily_closed;
+	const double live = (available != 0) ? available : opening_base + day_net + pos_net;
+	auto draw_balance = [&](int line_number, int vpos, const SCString& line_text) {
+		s_UseTool tool;
+		tool.Clear();
+		tool.ChartNumber = sc.ChartNumber;
+		tool.DrawingType = DRAWING_TEXT;
+		tool.LineNumber = line_number;
+		tool.AddMethod = UTAM_ADD_OR_ADJUST;
+		tool.Region = sc.GraphRegion;
+		tool.BeginDateTime = 1;
+		tool.BeginValue = vpos;
+		tool.UseRelativeVerticalValues = 1;
+		tool.Color = BalanceText.PrimaryColor;
+		tool.FontSize = BalanceText.LineWidth > 0 ? BalanceText.LineWidth : 12;
+		tool.FontBold = 1;
+		tool.Text = line_text;
+		tool.AddAsUserDrawnDrawing = 0;
+		tool.DrawUnderneathMainGraph = 0;
+		sc.UseTool(tool);
+	};
+	SCString line1;
+	line1.Format("ORION BAL %s LIVE %.2f", account.GetChars(), live);
+	draw_balance(kBalanceDrawing, 24, line1);
+	if (InShowParts.GetYesNo() != 0) {
+		SCString line2;
+		line2.Format(
+			"open %.2f day %+.2f pos %+.2f",
+			opening_base, day_net, pos_net);
+		if (InShowBroker.GetYesNo() != 0) {
+			SCString line3;
+			const double broker = sc.GetTradeServiceAccountBalanceForTradeAccount(account);
+			line3.Format("calc %.2f", opening_base + day_net + pos_net);
+			SCString both;
+			both.Format("%s  %s", line2.GetChars(), line3.GetChars());
+			draw_balance(kBalanceDrawing + 1, 30, both);
+		} else {
+			draw_balance(kBalanceDrawing + 1, 30, line2);
+		}
+	} else {
+		sc.DeleteACSChartDrawing(sc.ChartNumber, TOOL_DELETE_CHARTDRAWING, kBalanceDrawing + 1);
 	}
 }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-09-11
+
+### Orion
+
+- Alerts are configurable per direction: separate on/off toggles and alert numbers for long setup, short setup, and trigger (defaults 2, 1, 3). The setup master toggle still gates both directions.
+- Data overlay adds two lines under the arm status: bar delta with volume vs MA and gate flags, plus arm detail (entry, zone, climax, rebound target) or swing-scan state when flat.
+- New study Orion - Account Balance (Live): opening balance plus today's closed P/L plus open position P/L, for accounts without EOD reconciliation. Manual opening-balance override, optional components and broker-reported balance lines.
+
 ## 2026-09-04
 
 ### Orion
