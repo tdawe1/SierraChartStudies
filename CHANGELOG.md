@@ -35,7 +35,7 @@
   returns `const char*` (exporter). Stub updated to match so local checks
   catch this class.
 - `SCSFExport` is `extern "C"` (flat names, namespaces don't shield it),
-  so the bundle demotes bundled copies to plain `void` and only the 9
+  so the bundle demotes bundled copies to plain `void` and only the 11
   `scsf_` forwarders export. Stub now uses `extern "C"` too.
 
 - New `PropRiskOverlay.cpp` (self-contained, Remote Build): live day P/L vs
