@@ -20,7 +20,7 @@
   `g++ -std=c++17 -O2 -o /tmp/orion_core_test orion_core_test.cpp && /tmp/orion_core_test`.
 - **Input indices are append-only** (0–44 used). Never insert/reorder; after index
   changes the user must remove and re-add the study. Same for subgraphs (0–6),
-  persistent ints (1–9) / floats (1–6) in the main study.
+  persistent ints (1–11) / floats (1–6) in the main study.
 - Alerts use `sc.SetAlert(number, index, msg)` with per-direction toggles and
   numbers (long 2, short 1, trigger 3); gated on `index >= last_index - 1` and
   `!sc.IsFullRecalculation`, setups fire once per new arm.
@@ -28,10 +28,12 @@
   `LineNumber` keys (202609041–43); position via `BeginDateTime = 1`,
   `BeginValue` percent, `UseRelativeVerticalValues = 1`. Delete drawings when
   their toggle is off or lines linger.
-- `scsf_OrionAccountBalance` (same file): LIVE = opening (`GetTradeAccountData`
-  `m_AccountValue`, manual override available) + daily closed P/L
-  (`GetTradeStatisticsForSymbolV2`, needs `MaintainTradeStatisticsAndTradesData = 1`)
-  + open P/L (`GetTradePosition`, check `== 1`). **All figures must share the chart
+- `scsf_OrionAccountBalance` (same file): LIVE = non-zero
+  `m_AvailableFundsForNewPositions` from `GetTradeAccountData` (primary; correct
+  intraday on Rithmic), falling back to opening (`m_AccountValue`, manual override
+  available) + daily closed P/L (`GetTradeStatisticsForSymbolV2`, needs
+  `MaintainTradeStatisticsAndTradesData = 1`) + open P/L (`GetTradePosition`,
+  check `== 1`) as fallback/cross-check. **All figures must share the chart
   trade account and chart symbol** — never mix a configured account with
   chart-scoped P/L calls. Throttled studies need `sc.UpdateAlways = 1` or quiet
   charts go stale.

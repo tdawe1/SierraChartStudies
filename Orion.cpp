@@ -1180,6 +1180,7 @@ SCSFExport scsf_OrionAbsorptionClimax(SCStudyInterfaceRef sc) {
 			sc.IsFullRecalculation != 0, sc.Index, sc.UpdateStartIndex)) {
 		disarm();
 		fbar_index = -1;
+		triggered_bar = -1;
 		setup_alert_key = -1;
 		trigger_alert_key = -1;
 		vap_truncated_logged = 0;
