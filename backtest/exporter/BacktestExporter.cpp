@@ -1,5 +1,6 @@
 #include "sierrachart.h"
 #include <cmath>
+#include <cstring>
 
 SCDLLName("Backtest Exporter")
 
@@ -10,15 +11,17 @@ SCDLLName("Backtest Exporter")
 // What it writes (one row per closed bar, appended once):
 //   DateTime,Open,High,Low,Close,Volume,BidVolume,AskVolume,
 //   MaxDelta,MinDelta,SignalLong,SignalShort,ATR14,RelVol50,
-//   BidClose,AskClose
+//   BidClose,AskClose,Symbol
 // ATR14 is the mean true range over the last 14 closed bars (fewer at
 // the left edge); RelVol50 is bar volume over its 50-bar mean (1.0 when
 // dry). Both use bars at or before the row: no lookahead.
-// BidClose/AskClose are the bar's last bid/ask (sc.Bid/sc.Ask). They
-// equal the recorded market bid/ask only with Intraday Data Storage
-// Time Unit = 1 Tick (else Sierra replays estimated prices; see Trade
-// Simulation Method 1 vs 2). Headless consumers treat them as context,
-// never as fill prices.
+// BidClose/AskClose are the per-bar bid/ask at the last trade
+// (sc.BaseData[SC_BID_PRICE]/[SC_ASK_PRICE]; needs
+// sc.MaintainAdditionalChartDataArrays = 1). They equal the recorded
+// market bid/ask only with tick-by-tick data in the file (else Sierra
+// replays estimated prices; see Trade Simulation Method 1 vs 2).
+// Headless consumers treat them as context, never as fill prices.
+// Symbol is the chart symbol (sc.Symbol) for allowlist filtering.
 //
 // Wiring:
 //   [Signal] Study + Subgraph to export, twice (long leg, short leg).
@@ -43,6 +46,7 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
         sc.GraphName = "Backtest Exporter";
         sc.GraphRegion = 0;
         sc.AutoLoop = 0;
+        sc.MaintainAdditionalChartDataArrays = 1;
         sc.FreeDLL = 0;
 
         InPath.Name = "Output CSV path";
@@ -82,49 +86,70 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
     const bool haveMin = InMinDelta.GetStudyID() != 0 &&
         sc.GetStudyArrayUsingID(InMinDelta.GetStudyID(), InMinDelta.GetSubgraphIndex(), minArr) != 0;
 
-    // sc.Index is the starting index for this call chunk; with AutoLoop=0
-    // we get one call, so walk every closed bar here.
+    // Manual loop: export each updated range once. sc.UpdateStartIndex is
+    // where updating began (0 on a full recalculation); clamp defensively.
+    int startIndex = sc.UpdateStartIndex;
+    if (startIndex < 0)
+        startIndex = 0;
     const int lastClosed = n - 2; // skip the forming bar
-    if (lastClosed < 0 || sc.Index > lastClosed)
+    if (lastClosed < 0 || startIndex > lastClosed)
         return;
     FILE* f = nullptr;
-    const int doAppend = InAppend.GetYesNo();
-    int need_header = (sc.Index == 0 && !doAppend);
-    if (sc.Index == 0 && doAppend)
+    const char* HEADER =
+        "DateTime,Open,High,Low,Close,Volume,BidVolume,AskVolume,"
+        "MaxDelta,MinDelta,SignalLong,SignalShort,ATR14,RelVol50,"
+        "BidClose,AskClose,Symbol";
+    if (sc.IsFullRecalculation)
     {
-        // Fresh recalc in append mode: write the header only when the
-        // file is missing or empty (no-header append quirk fixed here
-        // instead of by prepending downstream).
+        f = fopen(InPath.GetString(), "w");
+        if (f == nullptr)
+        {
+            SCString msg;
+            msg.Format("BacktestExporter: cannot open %s", InPath.GetString());
+            sc.AddMessageToLog(msg, 1);
+            return;
+        }
+        fprintf(f, "%s\n", HEADER);
+    }
+    else
+    {
+        // Incremental update: never write a header here. Fail closed when
+        // the existing file is missing or carries another schema instead
+        // of silently producing a mixed-schema CSV.
         f = fopen(InPath.GetString(), "r");
+        int header_ok = 0;
         if (f != nullptr)
         {
-            fseek(f, 0, SEEK_END);
-            need_header = (ftell(f) == 0);
+            char first[1024];
+            if (fgets(first, sizeof(first), f) != nullptr)
+            {
+                size_t len = strlen(first);
+                while (len > 0 && (first[len - 1] == '\n' || first[len - 1] == '\r'))
+                    first[--len] = '\0';
+                header_ok = (strcmp(first, HEADER) == 0);
+            }
             fclose(f);
             f = nullptr;
         }
-        else
+        if (!header_ok)
         {
-            need_header = 1;
+            SCString msg;
+            msg.Format("BacktestExporter: %s missing or header mismatch "
+                       "(expected 17-column schema); Recalculate to rebuild it",
+                       InPath.GetString());
+            sc.AddMessageToLog(msg, 1);
+            return;
+        }
+        f = fopen(InPath.GetString(), "a");
+        if (f == nullptr)
+        {
+            SCString msg;
+            msg.Format("BacktestExporter: cannot open %s", InPath.GetString());
+            sc.AddMessageToLog(msg, 1);
+            return;
         }
     }
-    const char* mode = (sc.Index == 0 && !doAppend) ? "w" : "a";
-    f = fopen(InPath.GetString(), mode);
-    if (f == nullptr)
-    {
-        SCString msg;
-        msg.Format("BacktestExporter: cannot open %s", InPath.GetString());
-        sc.AddMessageToLog(msg, 1);
-        return;
-    }
-    if (need_header)
-    {
-        fprintf(f, "DateTime,Open,High,Low,Close,Volume,BidVolume,AskVolume,"
-                   "MaxDelta,MinDelta,SignalLong,SignalShort,ATR14,RelVol50,"
-                   "BidClose,AskClose\n");
-    }
-
-    for (int i = sc.Index; i <= lastClosed; ++i)
+    for (int i = startIndex; i <= lastClosed; ++i)
     {
         SCString dt = sc.DateTimeToString(sc.BaseDateTimeIn[i], FLAG_DT_COMPLETE_DATETIME);
         const double bid = sc.BidVolume[i];
@@ -158,10 +183,12 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
         }
         const double v_avg = v_n > 0 ? v_sum / v_n : 0.0;
         const double relvol50 = v_avg > 0.0 ? (double)sc.Volume[i] / v_avg : 1.0;
-        fprintf(f, "%s,%.6f,%.6f,%.6f,%.6f,%.0f,%.0f,%.0f,%.0f,%.0f,%d,%d,%.6f,%.6f,%.6f,%.6f\n",
+        const double bidPx = (double)sc.BaseData[SC_BID_PRICE][i];
+        const double askPx = (double)sc.BaseData[SC_ASK_PRICE][i];
+        fprintf(f, "%s,%.6f,%.6f,%.6f,%.6f,%.0f,%.0f,%.0f,%.0f,%.0f,%d,%d,%.6f,%.6f,%.6f,%.6f,%s\n",
                 dt.GetChars(), sc.Open[i], sc.High[i], sc.Low[i], sc.Close[i],
                 (double)sc.Volume[i], bid, ask, mx, mn, longSig, shortSig,
-                atr14, relvol50, (double)sc.Bid[i], (double)sc.Ask[i]);
+                atr14, relvol50, bidPx, askPx, sc.Symbol.GetChars());
     }
     fclose(f);
 }

@@ -20,13 +20,15 @@ COLS = [("trades", "Trades"), ("win_rate", "Win%"), ("total_pnl", "Total $"),
 
 
 def _fmt(m: dict, key: str) -> str:
+    """Cell text; None renders as '-'."""
     v = m.get(key, 0)
+    if v is None:
+        return "-"
     if key == "win_rate":
         return f"{v * 100:.0f}"
     if isinstance(v, float):
         return f"{v:,.0f}" if abs(v) >= 100 else f"{v}"
     return str(v)
-
 
 def rank_key(r: dict) -> float:
     oos = r.get("oos_metrics")
@@ -36,6 +38,7 @@ def rank_key(r: dict) -> float:
 
 
 def leaderboard_text(runs: list[dict]) -> str:
+    """Ranked-by-PnL terminal table."""
     head = (f"{'rank':<4} {'run':<34} {'study':<14} {'dataset':<18} "
             f"{'n':>3} {'win%':>4} {'total$':>9} {'oos$':>9} {'PF':>5} {'maxDD$':>8} {'trials':>6}")
     lines = [head]
@@ -48,7 +51,7 @@ def leaderboard_text(runs: list[dict]) -> str:
             f"{m.get('trades', 0):>3} {_fmt(m, 'win_rate'):>4} "
             f"{m.get('total_pnl', 0):>9,.0f} "
             f"{(f'{oos:,.0f}' if oos != '' else '-'):>9} "
-            f"{m.get('profit_factor', 0):>5} {m.get('max_drawdown', 0):>8,.0f} "
+            f"{(m.get('profit_factor') if m.get('profit_factor') is not None else '-'):>5} {m.get('max_drawdown', 0):>8,.0f} "
             f"{(r.get('n_trials') if r.get('n_trials') is not None else '-'):>6}")
     return "\n".join(lines)
 
@@ -128,7 +131,7 @@ def build_html(runs: list[dict], title: str = "Study comparison") -> str:
             f"<div class='card'><b>#{i} {html.escape(r['study'])}</b>"
             f"<span class='big'>{headline}</span>"
             f"<span>{html.escape(r.get('tag', ''))}</span>"
-            f"<span>Win {_fmt(m, 'win_rate')}% · PF {m.get('profit_factor', 0)} · "
+            f"<span>Win {_fmt(m, 'win_rate')}% · PF {_fmt(m, 'profit_factor')} · "
             f"MaxDD ${m.get('max_drawdown', 0):,.0f} · "
             f"{m.get('trades', 0)} trades</span></div>")
     return f"""<!DOCTYPE html>

@@ -25,7 +25,7 @@
 
 - `bundle.py`: merge all studies into one `AllStudies.cpp` (single
   SCDLLName, one namespace per study, global scsf_ forwarders) so one
-  Remote Build produces a single DLL with all 9 studies. Study names on
+  Remote Build produces a single DLL with all 11 studies. Study names on
   the chart are unchanged.
 - `bundle.py --install`: deploys all sources + bundle to the live
   `ACS_Source` (`SC_ACS_SOURCE` overrides); refreshed the three stale

@@ -105,9 +105,9 @@ runs that are profitable in-sample but flat/losing out-of-sample.
 - `orion_bar` approximates the setup (stacked VAP absorption → bar-delta
   gate) for fast sweeps. `signal_replay` replays chart-exported signals
   exactly — assess any study, including ones with no offline port.
-- Live twin: `OrionExecutor.cpp` fires the same chart signals via
-  `sc.BuyEntry`/`sc.SellEntry` under the halt gate. To certify exactly
-  what it will trade, wire the trigger subgraphs into the exporter's
+- Live twin: `SignalExecutor.cpp` (staging-repo root) turns the same trigger subgraphs into
+  real `sc.BuyEntry`/`sc.SellEntry` orders (closed-bar, sim default, opposite-signal exit).
+  To certify exactly what it will trade, wire the trigger subgraphs into the exporter's
   Signal inputs and `run` the export with `signal_replay`.
 
 ## Regimes and the signal budget
@@ -124,13 +124,14 @@ on a walk-forward or `--split` run; tag the shipped params
 ## Output schemas (stable)
 
 Every `run` writes the same four files, same columns/keys, so anything
-can parse them (`pandas.read_csv`, `jq`, a phone browser):
+can parse them (`pandas.read_csv`, `jq`, a phone browser).
+`walkforward` adds a fifth (`windows.csv`: per-window start/end/trades/pnl).
 
 | File | Shape | Human surface |
 |---|---|---|
 | `trades.csv` | `dir,entry_idx,entry_time,entry,exit_idx,exit_time,exit,reason,pnl,bars_held,qty,regime` | spreadsheet (desktop) |
 | `equity.csv` | `stamp,equity` | chart it anywhere |
-| `summary.json` | `{params, metrics, is_metrics?, oos_metrics?}`; metrics keys: `trades,wins,losses,win_rate,total_pnl,avg_win,avg_loss,profit_factor,expectancy,max_drawdown,calmar,sharpe_trade,max_consec_losses,avg_bars_held,risk_halts,target_hit,target_hit_stamp,best_day,best_day_pnl,best_day_pct,consistency_ok,regime,by_regime` | `jq .metrics` |
+| `summary.json` | `{params, metrics, is_metrics?, oos_metrics?}`; `run`/`split` metrics keys: `trades,wins,losses,win_rate,total_pnl,avg_win,avg_loss,profit_factor,expectancy,max_drawdown,calmar,sharpe_trade,max_consec_losses,avg_bars_held,risk_halts,target_hit,target_hit_stamp,best_day,best_day_pnl,best_day_pct,consistency_ok,regime,by_regime` (`profit_factor`/`calmar` are null when undefined: no losing trades / no drawdown). `walkforward` metrics carry the same keys minus the prop extras (`target_hit*`, `best_day*`, `consistency_ok`) — window detail lives in `windows.csv` | `jq .metrics` |
 | `report.txt` | same numbers, aligned text | terminal, email body |
 | `report.html` (`compare`) | top-5 cards + SVG equity + full leaderboard; viewport + responsive CSS, table scrolls horizontally | desktop and mobile browsers |
 

@@ -180,6 +180,7 @@ def do_run(data_path: str, params_path: str, out_dir: str,
 
 
 def write_outputs(out_dir: str, res: dict, params: dict, quiet: bool = False) -> None:
+    """Write one run's artifacts; equity.csv always lands (empty-safe)."""
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "trades.csv"), "w", newline="") as f:
         w = csv.writer(f)
@@ -190,11 +191,18 @@ def write_outputs(out_dir: str, res: dict, params: dict, quiet: bool = False) ->
             w.writerow([t.direction, t.entry_idx, t.entry_stamp, t.entry_price,
                         t.exit_idx, t.exit_stamp, t.exit_price, t.exit_reason,
                         round(t.pnl, 2), t.bars_held, t.qty, t.regime])
+    with open(os.path.join(out_dir, "equity.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["stamp", "equity"])
+        for st, v in zip(res.get("stamps", []), res.get("equity", [])):
+            w.writerow([st, round(v, 2)])
     with open(os.path.join(out_dir, "summary.json"), "w") as f:
         json.dump({"params": params, "metrics": res["metrics"],
                    "is_metrics": res.get("is_metrics"),
                    "oos_metrics": res.get("oos_metrics")}, f, indent=2)
     m = res["metrics"]
+    pf = m["profit_factor"] if m["profit_factor"] is not None else "-"
+    cm = m["calmar"] if m["calmar"] is not None else "-"
     lines = [
         f"strategy   : {params.get('strategy')}",
         f"trades     : {m['trades']}  (W {m['wins']} / L {m['losses']})",
@@ -202,9 +210,9 @@ def write_outputs(out_dir: str, res: dict, params: dict, quiet: bool = False) ->
         f"total PnL  : ${m['total_pnl']:,.2f}",
         f"expectancy : ${m['expectancy']:,.2f} / trade",
         f"avg win    : ${m['avg_win']:,.2f}   avg loss : ${m['avg_loss']:,.2f}",
-        f"profit fac : {m['profit_factor']}",
+        f"profit fac : {pf}",
         f"max DD     : ${m['max_drawdown']:,.2f}",
-        f"calmar     : {m['calmar']}   sharpeT : {m['sharpe_trade']}",
+        f"calmar     : {cm}   sharpeT : {m['sharpe_trade']}",
     ]
     eng = params.get("engine", {})
     if eng.get("account_size") and eng.get("risk_pct"):
@@ -313,6 +321,10 @@ def _walkforward_result(bars: list[Bar], signals: list[int], cfg: EngineConfig,
                         train: int, test: int, step: int,
                         embargo_days: int = 1) -> dict:
     """Rolling train/test loop; aggregate the out-of-sample trades."""
+    if train < 1 or test < 1 or step < 1:
+        raise ValueError(
+            f"walkforward needs train/test/step >= 1 "
+            f"(got {train}/{test}/{step})")
     all_trades: list[Trade] = []
     equity = [0.0]
     stamps = [bars[0].stamp if bars else ""]
@@ -502,9 +514,10 @@ def do_matrix(data_path: str, params_paths: list[str], out: str,
     lines = [f"{'rank':>4}  {'strategy':<14} {'session':<10} "
              f"{'n':>4}  {'win%':>5}  {'exp':>8}  {'pf':>6}  {'pnl':>9}"]
     for c in ranked:
+        pf = f"{c['profit_factor']:>6.3f}" if c["profit_factor"] is not None else f"{'-':>6}"
         lines.append(f"{c['rank']:>4}  {c['strategy']:<14} {c['session']:<10} "
                      f"{c['trades']:>4}  {c['win_rate'] * 100:>4.1f}% "
-                     f"${c['expectancy']:>7.2f}  {c['profit_factor']:>6.3f} "
+                     f"${c['expectancy']:>7.2f}  {pf} "
                      f"${c['total_pnl']:>8.2f}")
     low = [c for c in cells if c["n_low"]]
     if low:

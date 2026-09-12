@@ -18,7 +18,7 @@ import shlex
 import subprocess
 import tarfile
 import tempfile
-
+import uuid
 
 def build_bundle(src_dir: str, data_path: str, params_path: str,
                  dest_tar: str, job_name: str = "job") -> str:
@@ -35,20 +35,26 @@ def build_bundle(src_dir: str, data_path: str, params_path: str,
 def run_remote(host: str, bundle: str, remote_dir: str = "/tmp/bt",
                job_name: str = "job", dry_run: bool = False,
                extra_args: str = "", notify: str | None = None) -> list[str]:
-    """Copy bundle, run it, copy results back. Returns the commands used."""
-    remote_tar = f"{remote_dir}/{job_name}.tgz"
+    """Copy bundle, run it, copy results back. Returns the commands used.
+
+    Each call gets a unique remote workspace (mode 700) and local
+    output dir, so concurrent runs never share paths."""
+    run_id = uuid.uuid4().hex[:8]
+    workdir = f"{remote_dir}/bt-{run_id}"
+    remote_tar = f"{workdir}.tgz"
+    local_out = f"./out-{run_id}"
     cmds = [
-        f"ssh {shlex.quote(host)} {shlex.quote(f'mkdir -p {remote_dir}')}",
+        f"ssh {shlex.quote(host)} {shlex.quote(f'mkdir -p -m 700 {workdir}')}",
         f"scp {shlex.quote(bundle)} {shlex.quote(host + ':' + remote_tar)}",
         f"ssh {shlex.quote(host)} {shlex.quote(
-            f'cd {remote_dir} && rm -rf {job_name} && tar xzf {job_name}.tgz '
+            f'cd {workdir} && tar xzf {remote_tar} '
             f'&& cd {job_name} && python3 backtest/bt.py run '
             f'--data data.csv --params params.json --out out {extra_args}')}",
-        f"scp -r {shlex.quote(host + ':' + remote_dir + '/' + job_name + '/out')} "
-        f"{shlex.quote('./out-' + job_name)}",
+        f"scp -r {shlex.quote(host + ':' + workdir + '/' + job_name + '/out')} "
+        f"{shlex.quote(local_out)}",
     ]
     if notify:
-        cmds.append(f"email {notify} < ./out-{job_name}/report.txt"
+        cmds.append(f"email {notify} < {local_out}/report.txt"
                     + (" (dry-run, not sent)" if dry_run else ""))
     if dry_run:
         return cmds

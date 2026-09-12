@@ -163,7 +163,9 @@ def _slip_price(price: float, direction: int, side: str, cfg: EngineConfig) -> f
 def _entry_qty(cfg: EngineConfig, atr_points: float = 0.0) -> int:
     """Contracts for the risk budget. Exactly one rule runs: ATR-sized
     when size_by_atr (stop_ticks then only places stops), else sized from
-    the stop. Zero/unknown ATR falls back to 1 contract, never divides."""
+    the stop. Zero/unknown ATR falls back to 1 contract, never divides.
+    A risk budget below one contract's stop cost returns 0 (caller
+    skips the entry rather than risking more than risk_pct)."""
     if cfg.size_by_atr:
         if (cfg.account_size > 0 and cfg.risk_pct > 0 and cfg.tick_value > 0
                 and cfg.tick_size > 0 and atr_points > 0):
@@ -171,18 +173,18 @@ def _entry_qty(cfg: EngineConfig, atr_points: float = 0.0) -> int:
                             * (atr_points / cfg.tick_size * cfg.tick_value)
                             + 2 * cfg.fee_per_side)
             if per_contract > 0:
-                return max(1, min(cfg.max_qty,
-                                  int(cfg.account_size * cfg.risk_pct / 100.0
-                                      // per_contract)))
+                return min(cfg.max_qty,
+                           int(cfg.account_size * cfg.risk_pct / 100.0
+                               // per_contract))
         warnings.warn("size_by_atr with no ATR on this bar: qty 1")
         return 1
     if (cfg.account_size > 0 and cfg.risk_pct > 0 and cfg.stop_ticks > 0
             and cfg.tick_value > 0):
         per_contract = cfg.stop_ticks * cfg.tick_value + 2 * cfg.fee_per_side
         if per_contract > 0:
-            return max(1, min(cfg.max_qty,
-                              int(cfg.account_size * cfg.risk_pct / 100.0
-                                  // per_contract)))
+            return min(cfg.max_qty,
+                       int(cfg.account_size * cfg.risk_pct / 100.0
+                           // per_contract))
     return cfg.qty
 
 
@@ -224,22 +226,28 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
         sig = signals[i] if i < len(signals) else 0
         day = bar.stamp[:10]
         if day != cur_day:
+            if pos is not None and cfg.tick_size:
+                carry = (pos.direction * (bar.open - pos.entry_price)
+                         / cfg.tick_size * cfg.tick_value * pos.qty)
+            else:
+                carry = 0.0
             if cur_day:
-                day_pnls[cur_day] = day_pnls.get(cur_day, 0.0) + (cum - day_start)
-            cur_day, day_start, halted_day = day, cum, ""
+                day_pnls[cur_day] = day_pnls.get(cur_day, 0.0) + (cum + carry - day_start)
+            cur_day, day_start, halted_day = day, cum + carry, ""
 
         blocked = dead or halted_day == day
         # 1. Fill pending entry at this bar's open (unless gated).
         if pending and pos is None and not blocked:
             if _in_windows(bar.stamp, cfg):
-                fill = _slip_price(bar.open, pending, "entry", cfg)
-                stop = fill - pending * cfg.stop_ticks * cfg.tick_size if cfg.stop_ticks else 0.0
-                target = fill + pending * cfg.target_ticks * cfg.tick_size if cfg.target_ticks else 0.0
-                pos = Position(direction=pending, entry_idx=bar.idx,
-                               entry_stamp=bar.stamp, entry_price=fill,
-                               stop_price=stop, target_price=target,
-                               qty=_entry_qty(cfg, bar.atr))
-                day_entries[day] = day_entries.get(day, 0) + 1
+                qty = _entry_qty(cfg, bar.atr)
+                if qty > 0:
+                    fill = _slip_price(bar.open, pending, "entry", cfg)
+                    stop = fill - pending * cfg.stop_ticks * cfg.tick_size if cfg.stop_ticks else 0.0
+                    target = fill + pending * cfg.target_ticks * cfg.tick_size if cfg.target_ticks else 0.0
+                    pos = Position(direction=pending, entry_idx=bar.idx,
+                                   entry_stamp=bar.stamp, entry_price=fill,
+                                   stop_price=stop, target_price=target, qty=qty)
+                    day_entries[day] = day_entries.get(day, 0) + 1
             pending = 0
         elif blocked:
             pending = 0
@@ -265,11 +273,11 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
                 close_pos(bar, _slip_price(bar.close, d, "exit", cfg), "time")
                 exited = True
             elif cfg.exit_on_opposite and sig != 0 and sig != d:
-                if (d < 0 and cfg.allow_long) or (d > 0 and cfg.allow_short):
-                    close_pos(bar, _slip_price(bar.close, d, "exit", cfg), "opposite")
-                    exited = True
-                    if cfg.reverse_on_opposite:
-                        pending, pending_stamp, pending_idx = sig, bar.stamp, bar.idx
+                close_pos(bar, _slip_price(bar.close, d, "exit", cfg), "opposite")
+                exited = True
+                if cfg.reverse_on_opposite and (
+                        (sig > 0 and cfg.allow_long) or (sig < 0 and cfg.allow_short)):
+                    pending, pending_stamp, pending_idx = sig, bar.stamp, bar.idx
             _ = exited
 
         # 3. Prop risk check on marked-to-market equity, then new entries.
@@ -307,14 +315,15 @@ def run(bars: list[Bar], signals: list[int], cfg: EngineConfig) -> dict:
             elif not _in_windows(bar.stamp, cfg):
                 pass
             elif cfg.exec_mode == "close":
-                fill = _slip_price(bar.close, sig, "entry", cfg)
-                stop = fill - sig * cfg.stop_ticks * cfg.tick_size if cfg.stop_ticks else 0.0
-                target = fill + sig * cfg.target_ticks * cfg.tick_size if cfg.target_ticks else 0.0
-                pos = Position(direction=sig, entry_idx=bar.idx,
-                               entry_stamp=bar.stamp, entry_price=fill,
-                               stop_price=stop, target_price=target,
-                               qty=_entry_qty(cfg, bar.atr))
-                day_entries[day] = day_entries.get(day, 0) + 1
+                qty = _entry_qty(cfg, bar.atr)
+                if qty > 0:
+                    fill = _slip_price(bar.close, sig, "entry", cfg)
+                    stop = fill - sig * cfg.stop_ticks * cfg.tick_size if cfg.stop_ticks else 0.0
+                    target = fill + sig * cfg.target_ticks * cfg.tick_size if cfg.target_ticks else 0.0
+                    pos = Position(direction=sig, entry_idx=bar.idx,
+                                   entry_stamp=bar.stamp, entry_price=fill,
+                                   stop_price=stop, target_price=target, qty=qty)
+                    day_entries[day] = day_entries.get(day, 0) + 1
             else:
                 pending, pending_stamp, pending_idx = sig, bar.stamp, bar.idx
 
@@ -356,6 +365,7 @@ def _rule_metrics(day_pnls: dict[str, float], cfg: EngineConfig,
 
 
 def metrics(trades: list[Trade], equity: list[float]) -> dict:
+    """Trade stats; profit_factor/calmar are None when undefined."""
     n = len(trades)
     wins = [t for t in trades if t.pnl > 0]
     losses = [t for t in trades if t.pnl <= 0]
@@ -384,10 +394,10 @@ def metrics(trades: list[Trade], equity: list[float]) -> dict:
         "total_pnl": round(total, 2),
         "avg_win": round(avg_w, 2),
         "avg_loss": round(avg_l, 2),
-        "profit_factor": round(gross_w / gross_l, 3) if gross_l > 0 else 0.0,
+        "profit_factor": round(gross_w / gross_l, 3) if gross_l > 0 else None,
         "expectancy": round(total / n, 2) if n else 0.0,
         "max_drawdown": round(dd, 2),
-        "calmar": round(total / -dd, 3) if dd < 0 else 0.0,
+        "calmar": round(total / -dd, 3) if dd < 0 else None,
         "sharpe_trade": round(sharpe, 3),
         "max_consec_losses": worst_consec,
         "avg_bars_held": round(sum(t.bars_held for t in trades) / n, 1) if n else 0.0,

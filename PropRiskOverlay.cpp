@@ -102,7 +102,7 @@ SCSFExport scsf_PropRiskOverlay(SCStudyInterfaceRef sc) {
     if (sc.SetDefaults) {
         sc.GraphName = "Prop Risk Overlay";
         sc.GraphRegion = 0;
-        sc.AutoLoop = 0;
+        sc.AutoLoop = 1;
         sc.UpdateAlways = 1;
         sc.MaintainTradeStatisticsAndTradesData = 1;
 
@@ -164,7 +164,7 @@ SCSFExport scsf_PropRiskOverlay(SCStudyInterfaceRef sc) {
     float& peak = sc.GetPersistentFloat(0);
     const int now_sec = sc.CurrentSystemDateTime.GetTimeInSeconds();
     const int refresh = InRefreshSec.GetInt() < 1 ? 1 : InRefreshSec.GetInt();
-    if (last_update != 0 && now_sec - last_update < refresh)
+    if (last_update != 0 && now_sec >= last_update && now_sec - last_update < refresh)
         return;
     last_update = now_sec;
 
@@ -194,13 +194,22 @@ SCSFExport scsf_PropRiskOverlay(SCStudyInterfaceRef sc) {
     double opening_base = opening;
     if (InOpeningIncludesDay.GetYesNo() != 0)
         opening_base = opening - daily_closed;
-    const double live = (available != 0.0)
+    // A valid zero stays zero (fail-closed halt math): only fall back to
+    // the computed leg when the account query itself failed.
+    const int have_live = have_fields != 0;
+    const double live = have_live
         ? available : opening_base + day_net + pos_net;
-    const double day_pl = (available != 0.0)
+    const double day_pl = have_live
         ? live - opening_base : day_net + pos_net;
-
-    if (InResetPeak.GetYesNo() != 0 || peak == 0 || live > peak)
+    // Edge-triggered: a latched-Yes input must not pin peak = live and
+    // disable the trailing halt. Reset only on a 0 -> nonzero transition
+    // (init and ratchet arms stay).
+    int& prev_reset = sc.GetPersistentInt(4);
+    const int reset_now_peak = InResetPeak.GetYesNo() != 0 ? 1 : 0;
+    if ((reset_now_peak != 0 && prev_reset == 0) || peak == 0 || live > peak)
         peak = static_cast<float>(live);
+    prev_reset = reset_now_peak;
+
 
     const double daily_limit = InDailyLimit.GetFloat();
     const double trail_limit = InTrailLimit.GetFloat();

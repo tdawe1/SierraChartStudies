@@ -76,6 +76,7 @@ def _num(v) -> float:
 
 
 def load_journal(path: str, point_value: float = 1.0) -> list[dict]:
+    """Load manual-journal rows; explicit Qty<=0 is rejected."""
     rows = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
@@ -89,7 +90,10 @@ def load_journal(path: str, point_value: float = 1.0) -> list[dict]:
             if not stamp:
                 continue
             side = _side(row.get("side", ""))
-            qty = _num(row.get("qty", "1")) or 1.0
+            raw_qty = (row.get("qty", "") or "").strip()
+            qty = _num(raw_qty) if raw_qty else 1.0
+            if qty <= 0:
+                raise ValueError(f"bad qty {raw_qty!r} at {stamp} in {path}")
             entry, exit = _num(row.get("entry", "")), _num(row.get("exit", ""))
             pnl = _num(row.get("pnl", ""))
             if not row.get("pnl", "").strip() and side and entry and exit:

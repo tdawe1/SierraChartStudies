@@ -105,8 +105,7 @@ class TestStrategies(unittest.TestCase):
                 bar(idx=2, bidvol=450, askvol=550, maxdelta=400, mindelta=-200)]
         sigs = orion_bar(bars, setup_min_delta=500, climax_min=0,
                          rebound_mode=1, rebound_pct=50, lifetime_bars=3)
-        self.assertEqual(sigs[0], 0)  # setup bar never signals itself
-        self.assertEqual(len(sigs), 3)
+        self.assertEqual(sigs, [0, 1, 0])  # arm / climax / rebound
 
     def test_sample_csv_loads(self):
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

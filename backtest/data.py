@@ -48,6 +48,7 @@ _ALIASES = {
     "signalshort": "signal_short", "signal_short": "signal_short",
     "atr": "atr", "atr14": "atr",
     "relvol": "relvol", "relvol50": "relvol", "rel_vol": "relvol",
+    "symbol": "symbol",
 }
 
 
@@ -59,6 +60,7 @@ def _num(row: dict, key: str) -> float:
 
 
 def load_csv(path: str) -> list[Bar]:
+    """Load bars from CSV; separate Date+Time columns join into stamp."""
     bars: list[Bar] = []
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
@@ -76,11 +78,13 @@ def load_csv(path: str) -> list[Bar]:
                 time_col = h
         for raw in reader:
             row = {norm[h]: (raw[h] or "") for h in reader.fieldnames if norm[h]}
-            if date_col is not None and time_col is not None and not row.get("stamp"):
-                row["stamp"] = f"{raw[date_col].strip()} {raw[time_col].strip()}"
+            if date_col is not None and time_col is not None:
+                d = (raw[date_col] or "").strip()
+                t = (raw[time_col] or "").strip()
+                row["stamp"] = f"{d} {t}".strip()
             o, h_, l_, c = (_num(row, "open"), _num(row, "high"),
                             _num(row, "low"), _num(row, "close"))
-            if not (h_ > 0 and l_ > 0 and h_ >= l_):
+            if not (h_ > 0 and l_ > 0 and h_ >= l_ and o > 0 and c > 0):
                 continue
             bars.append(Bar(
                 idx=idx, stamp=(row.get("stamp", "") or "").strip(),

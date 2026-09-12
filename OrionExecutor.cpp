@@ -58,6 +58,7 @@ SCSFExport scsf_OrionExecutor(SCStudyInterfaceRef sc) {
     SCInputRef InQty = sc.Input[9];
     SCInputRef InStopTicks = sc.Input[10];
     SCInputRef InTargetTicks = sc.Input[11];
+    SCInputRef InLiveRouting = sc.Input[12];
 
     if (sc.SetDefaults) {
         sc.GraphName = "Orion Executor";
@@ -96,8 +97,13 @@ SCSFExport scsf_OrionExecutor(SCStudyInterfaceRef sc) {
         InTargetTicks.Name = "Attached target ticks (0 = none)";
         InTargetTicks.SetInt(0);
         InTargetTicks.SetIntLimits(0, 1000);
+        InLiveRouting.Name = "Route live via Trade Service (No = simulation)";
+        InLiveRouting.SetYesNo(0);
         return;
     }
+
+    // Live routing is a deliberate act: simulation unless the input says so.
+    sc.SendOrdersToTradeService = InLiveRouting.GetYesNo() != 0 ? 1 : 0;
 
     int& last_entry_bar = sc.GetPersistentInt(0);
 
@@ -150,17 +156,24 @@ SCSFExport scsf_OrionExecutor(SCStudyInterfaceRef sc) {
         return;
     }
 
-    // (d) One position at a time, no reversal in v1.
+    // (d) One position at a time, no reversal in v1. Fail closed: any
+    // outcome other than a clean flat/position read stands down, since a
+    // failed query must never let an order through.
     s_SCPositionData pos;
-    if (sc.GetTradePosition(pos) != 0 && pos.PositionQuantity != 0.0) {
+    if (sc.GetTradePosition(pos) != 1) {
+        Status[sc.Index] = static_cast<float>(ST_ORDER_ERROR);
+        if (sc.Index == sc.ArraySize - 1)
+            sc.AddMessageToLog("OrionExecutor: position query failed; standing down", 1);
+        return;
+    }
+    if (pos.PositionQuantity != 0.0) {
         Status[sc.Index] = static_cast<float>(ST_HAS_POSITION);
         return;
     }
 
-    // (e) Fire. Brackets derive from the trigger bar's close so the chart
-    // entry matches the backtest's stop_ticks/target_ticks inputs.
-    const double tick = sc.TickSize > 0.0 ? sc.TickSize : 0.25;
-    const double close = sc.Close[sc.Index];
+    // (e) Fire. Brackets are entry-relative tick offsets, so the fill-side
+    // stop/target match the backtest's stop_ticks/target_ticks exactly,
+    // even across gaps (absolute prices from the trigger close would not).
     s_SCNewOrder order;
     order.OrderQuantity = InQty.GetInt() > 0 ? InQty.GetInt() : 1;
     order.OrderType = SCT_MARKET;
@@ -168,14 +181,17 @@ SCSFExport scsf_OrionExecutor(SCStudyInterfaceRef sc) {
     const int stop_ticks = InStopTicks.GetInt();
     const int target_ticks = InTargetTicks.GetInt();
     if (stop_ticks > 0)
-        order.Stop1Price = sc.RoundToTickSize(close - direction * stop_ticks * tick, tick);
+        order.Stop1Offset = static_cast<float>(stop_ticks);
     if (target_ticks > 0)
-        order.Target1Price = sc.RoundToTickSize(close + direction * target_ticks * tick, tick);
+        order.Target1Offset = static_cast<float>(target_ticks);
     order.TextTag = "orion-exec";
 
     const int result = direction > 0 ? sc.BuyEntry(order) : sc.SellEntry(order);
+    // Latch on every attempt, not only on acceptance: a rejection is
+    // logged, never retried on that bar (sc.AllowOnlyOneTradePerBar = 1
+    // is the second layer).
+    last_entry_bar = sc.Index;
     if (result > 0) {
-        last_entry_bar = sc.Index;
         Status[sc.Index] = static_cast<float>(direction > 0 ? ST_LONG : ST_SHORT);
     } else {
         Status[sc.Index] = static_cast<float>(ST_ORDER_ERROR);
