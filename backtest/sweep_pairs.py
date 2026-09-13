@@ -65,7 +65,7 @@ def main(argv=None):
         rows.append((m["total_pnl"], m["trades"], m["profit_factor"], name))
     rows.sort(reverse=True)
     for total, n, pf, name in rows:
-        print(f"{total:>12,.2f} n={n:>4} pf={pf:.3f} {name}")
+        print(f"{total:>12,.2f} n={n:>4} pf={pf if pf is not None else '-':} {name}")
     pos = sum(1 for r in rows if r[0] > 0)
     print(f"{len(rows)} combos, {pos} profitable")
     if rows:

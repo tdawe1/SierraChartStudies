@@ -20,6 +20,7 @@ class MrouExactTests(unittest.TestCase):
         from strategies import mrou_ou
         bars = load_csv(str(CSV))
         sig = mrou_ou(bars, tick_size=1.0)
+        self.assertEqual(len(bars), len(sig), "signal/bar count mismatch")
         for b, s in zip(bars, sig):
             want = (1 if b.signal_long else (-1 if b.signal_short else 0))
             self.assertEqual(s, want, f"marker mismatch at {b.stamp}")

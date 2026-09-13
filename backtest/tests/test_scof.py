@@ -39,6 +39,7 @@ class ScofExactTests(unittest.TestCase):
         foot = [fp.get(" ".join(b.stamp.split())[:16], []) for b in bars]
         missing = sum(1 for f in foot if not f)
         sig = scof_absorption(bars, foot, tick_size=1.0)
+        self.assertEqual(len(bars), len(sig), "signal/bar count mismatch")
         for b, s in zip(bars, sig):
             want = (1 if b.signal_long else (-1 if b.signal_short else 0))
             self.assertEqual(s, want, f"marker mismatch at {b.stamp}")

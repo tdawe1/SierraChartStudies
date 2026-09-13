@@ -42,7 +42,7 @@ class SweepScofTests(unittest.TestCase):
             out = os.path.join(td, "out")
             sweep_main(["--bars", bars, "--fp", fp, "--params",
                         str(HERE.parent / "params.replay.json"),
-                        "--out", out, "--tick-size", "1.0"])
+                        "--out", out, "--tick-size", "1.0", "--no-log"])
             accepted = load_csv(bars)
             self.assertEqual(len(accepted), len(ROWS) - 1)
             combos = sorted(os.listdir(out))

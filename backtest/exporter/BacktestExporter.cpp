@@ -8,7 +8,8 @@ SCDLLName("Backtest Exporter")
 // backtester in backtest/ (bt.py). Copy this file into ACS_Source and
 // Remote Build it alongside your studies.
 //
-// What it writes (one row per closed bar, appended once):
+// What it writes (one row per closed bar, appended once; a rewound update
+// range after a data correction rebuilds the file so stale rows go away).
 //   DateTime,Open,High,Low,Close,Volume,BidVolume,AskVolume,
 //   MaxDelta,MinDelta,SignalLong,SignalShort,ATR14,RelVol50,
 //   BidClose,AskClose,Symbol
@@ -161,13 +162,39 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
             sc.AddMessageToLog(msg, 1);
             return;
         }
-        f = fopen(InPath.GetString(), "a");
-        if (f == nullptr)
+        // A rewound UpdateStartIndex (data correction) overlaps rows already
+        // on disk: the timestamp skip below would keep the stale versions.
+        // Rebuild from bar 0 instead; corrections are rare and correctness
+        // beats incremental I/O here.
+        SCString firstDt = sc.DateTimeToString(sc.BaseDateTimeIn[startIndex], FLAG_DT_COMPLETE_DATETIME);
+        if (lastExportedDt[0] != '\0' && strcmp(firstDt.GetChars(), lastExportedDt) <= 0)
         {
             SCString msg;
-            msg.Format("BacktestExporter: cannot open %s", InPath.GetString());
+            msg.Format("BacktestExporter: range overlaps exported data "
+                       "(correction?); rebuilding %s", InPath.GetString());
             sc.AddMessageToLog(msg, 1);
-            return;
+            f = fopen(InPath.GetString(), "w");
+            if (f == nullptr)
+            {
+                SCString msg2;
+                msg2.Format("BacktestExporter: cannot open %s", InPath.GetString());
+                sc.AddMessageToLog(msg2, 1);
+                return;
+            }
+            fprintf(f, "%s\n", HEADER);
+            startIndex = 0;
+            lastExportedDt[0] = '\0';
+        }
+        else
+        {
+            f = fopen(InPath.GetString(), "a");
+            if (f == nullptr)
+            {
+                SCString msg;
+                msg.Format("BacktestExporter: cannot open %s", InPath.GetString());
+                sc.AddMessageToLog(msg, 1);
+                return;
+            }
         }
     }
     for (int i = startIndex; i <= lastClosed; ++i)

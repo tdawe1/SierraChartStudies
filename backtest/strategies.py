@@ -480,7 +480,7 @@ def pairs_metrics(pnls: list[float]) -> dict:
     gross_loss = sum(losses)
     return {"trades": n, "total_pnl": cum,
             "win_rate": len(wins) / n,
-            "profit_factor": sum(wins) / gross_loss if gross_loss else 0.0,
+            "profit_factor": sum(wins) / gross_loss if gross_loss else None,
             "max_drawdown": maxdd, "expectancy": cum / n}
 
 

@@ -108,8 +108,9 @@ runs that are profitable in-sample but flat/losing out-of-sample.
 - `orion_bar` approximates the setup (stacked VAP absorption → bar-delta
   gate) for fast sweeps. `signal_replay` replays chart-exported signals
   exactly — assess any study, including ones with no offline port.
-- Live twin: `SignalExecutor.cpp` (staging-repo root) turns the same trigger subgraphs into
-  real `sc.BuyEntry`/`sc.SellEntry` orders (closed-bar, sim default, opposite-signal exit).
+- Live twin: `OrionExecutor.cpp` (repo root, in the bundle) turns the same trigger subgraphs into
+  real `sc.BuyEntry`/`sc.SellEntry` orders (closed-bar, sim default, no reversal — new entries
+  are refused while a position exists).
   To certify exactly what it will trade, wire the trigger subgraphs into the exporter's
   Signal inputs and `run` the export with `signal_replay`.
 

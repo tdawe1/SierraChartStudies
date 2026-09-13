@@ -12,8 +12,8 @@ from engine import Bar
 from strategies import statarb_spread, pairs_trade_pnl, pairs_metrics
 
 
-def mkbar(stamp, o, h, l, c, v=100):
-    return Bar(idx=0, stamp=stamp, open=o, high=h, low=l, close=c,
+def mkbar(stamp, o, h, low, c, v=100):
+    return Bar(idx=0, stamp=stamp, open=o, high=h, low=low, close=c,
                volume=v, bidvol=v // 2, askvol=v - v // 2)
 
 

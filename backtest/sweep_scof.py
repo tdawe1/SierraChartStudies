@@ -49,6 +49,8 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--tag-prefix", default="scof")
     ap.add_argument("--tick-size", type=float, default=1.0)
+    ap.add_argument("--no-log", action="store_true",
+                    help="skip the results store (tests)")
     a = ap.parse_args(argv)
     bars = load_csv(a.bars)
     fp = load_footprint(a.fp, a.tick_size)
@@ -72,7 +74,8 @@ def main(argv=None):
             w = csv.DictWriter(f, fieldnames=[
                 "DateTime", "Open", "High", "Low", "Close", "Volume",
                 "BidVolume", "AskVolume", "MaxDelta", "MinDelta",
-                "SignalLong", "SignalShort"])
+                "SignalLong", "SignalShort", "ATR14", "RelVol50",
+                "Symbol"])
             w.writeheader()
             for b, s in zip(bars, sig):
                 w.writerow({
@@ -81,10 +84,13 @@ def main(argv=None):
                     "BidVolume": b.bidvol, "AskVolume": b.askvol,
                     "MaxDelta": b.maxdelta, "MinDelta": b.mindelta,
                     "SignalLong": "1" if s == 1 else "0",
-                    "SignalShort": "1" if s == -1 else "0"})
+                    "SignalShort": "1" if s == -1 else "0",
+                    "ATR14": b.atr, "RelVol50": b.relvol,
+                    "Symbol": b.symbol})
         n = sum(1 for s in sig if s)
         res = do_run(sig_path, a.params, os.path.join(d, "run"),
-                     tag=f"{a.tag_prefix} {name}", quiet=True)
+                     tag=f"{a.tag_prefix} {name}", quiet=True,
+                     log=not a.no_log)
         m = res["metrics"]
         pf = m["profit_factor"]
         print(f"{m['total_pnl']:>12,.2f} n={m['trades']:>4} "

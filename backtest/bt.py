@@ -900,7 +900,8 @@ def main() -> None:
                     a.footprint)
         from data import load_csv
         bars = load_csv(a.out)  # fail fast if the contract broke
-        assert len(bars) == n, f"wrote {n} bars but loaded {len(bars)}"
+        if len(bars) != n:
+            raise RuntimeError(f"wrote {n} bars but loaded {len(bars)}")
         print(f"validated: {len(bars)} bars load clean "
               f"({bars[0].stamp} -> {bars[-1].stamp})")
         if a.check_dly:
