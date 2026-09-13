@@ -176,7 +176,7 @@ SCSFExport scsf_OrionExecutor(SCStudyInterfaceRef sc) {
     // even across gaps (absolute prices from the trigger close would not).
     s_SCNewOrder order;
     order.OrderQuantity = InQty.GetInt() > 0 ? InQty.GetInt() : 1;
-    order.OrderType = SCT_MARKET;
+    order.OrderType = SCT_ORDERTYPE_MARKET;
     order.TimeInForce = SCT_TIF_DAY;
     const int stop_ticks = InStopTicks.GetInt();
     const int target_ticks = InTargetTicks.GetInt();
