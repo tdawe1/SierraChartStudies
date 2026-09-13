@@ -17,7 +17,7 @@
 
 SCDLLName("Saty Pivot Ribbon")
 
-SCSFExport scsf_SatyPivotRibbon(SCStudyGraphRef sc)
+SCSFExport scsf_SatyPivotRibbon(SCStudyInterfaceRef sc)
 {
 	// Subgraph references for main EMA lines
 	SCSubgraphRef Subgraph_FastEMA = sc.Subgraph[0];
@@ -272,7 +272,7 @@ SCSFExport scsf_SatyPivotRibbon(SCStudyGraphRef sc)
 
 		// Configure Colored Bar Subgraphs (for candle bias coloring)
 		Subgraph_ColoredOpen.Name = "Colored Open";
-		Subgraph_ColoredOpen.DrawStyle = DRAWSTYLE_COLORBAR;
+		Subgraph_ColoredOpen.DrawStyle = DRAWSTYLE_COLOR_BAR;
 		Subgraph_ColoredOpen.PrimaryColor = RGB(0, 0, 0);
 		Subgraph_ColoredOpen.SecondaryColor = RGB(0, 0, 0);
 		Subgraph_ColoredOpen.DrawZeros = false;
@@ -511,7 +511,7 @@ SCSFExport scsf_SatyPivotRibbon(SCStudyGraphRef sc)
 	if (Input_ShowCandleBias.GetYesNo())
 	{
 		// Enable colored bars
-		Subgraph_ColoredOpen.DrawStyle = DRAWSTYLE_COLORBAR;
+		Subgraph_ColoredOpen.DrawStyle = DRAWSTYLE_COLOR_BAR;
 
 		float BiasEMAValue = Subgraph_BiasEMA[BarIndex];
 		float OpenPrice = sc.Open[BarIndex];

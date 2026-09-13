@@ -5,11 +5,13 @@
 - `~/SierraChartStudies` — study sources. Origin `tdawe1/SierraChartStudies` (fork),
   upstream `TradesTrevor/SierraChartStudies`. Open PRs in the fork; a cross-fork
   PR to upstream was rejected ("no commits between"), so retarget from the PR page.
-- `~/SierraChart` (separate checkout = live Sierra Chart data folder) — copy the
-  built `.cpp` there so Remote Build can compile it. Do NOT commit build outputs
-  there; it already carries many untracked DLLs/CHTs. `TraderOracle.cpp` there owns
-  the unrelated **Olympus** study — Orion work never touches it (they were confused
-  once; Olympus ≠ Orion).
+- Live Sierra install is Wine: `~/.wine/drive_c/SierraChart/`, sources in
+  `ACS_Source/` there. **Deploy with `python3 bundle.py --install`** (env
+  `SC_ACS_SOURCE` overrides the target): bundles defaults to `AllStudies.cpp`
+  and copies all 8 sources + bundle, so Remote Build sees fresh files.
+  `~/SierraChart/` is a separate staging checkout, not the build folder.
+  `TraderOracle.cpp` there owns the unrelated **Olympus** study — Orion work
+  never touches it (they were confused once; Olympus ≠ Orion).
 
 ## Orion (`Orion.cpp`)
 
@@ -41,9 +43,29 @@
   with `g++ -std=c++17 -fsyntax-only -I/tmp/orion_check Orion.cpp`. Stub must define
   `SCDLLName(x)` *with* trailing semicolon. Rebuild/refresh the stub if new ACSIL
   APIs are used.
-- After edits: run core tests, syntax-check, copy `Orion.cpp` to `~/SierraChart/`,
+- After edits: run core tests, syntax-check, `python3 bundle.py --install`,
   update README + CHANGELOG (dated `### Orion` section).
 
 ## Backtesting
 
 `backtest/` holds the local assessment harness: `python3 backtest/bt.py demo --out demo-report.html`.
+
+## Other studies
+
+- `FlipperStudies.cpp` was a full-file merge conflict (theirs + HEAD
+  concatenated, duplicate studies). Resolved theirs-first, then appended the
+  HEAD-only `scsf_DynamicFlipper`. When merging duplicates, diff the shared
+  studies first — here they differed by whitespace only.
+- `SatyPivotRibbon.cpp` had two real bugs: `SCStudyGraphRef` (must be
+  `SCStudyInterfaceRef`) and `DRAWSTYLE_COLORBAR` (official name is
+  `DRAWSTYLE_COLOR_BAR`, verified against Sierra docs).
+- `DiscordAlerts.cpp`: pass `SCString` to `const char*` params via `.GetChars()`,
+  never rely on implicit conversion.
+- Syntax-check loop for every study (stub is at `/tmp/orion_check/sierrachart.h`,
+  extended as new ACSIL APIs appear):
+  `for f in *.cpp; do g++ -std=c++17 -fsyntax-only -I/tmp/orion_check $f; done`
+  All five studies must print no errors. Stub gaps (missing member/constant) vs
+  real bugs (wrong type/name per Sierra docs) — verify the latter before
+  touching source.
+- `backtest/` is tracked (its own `.gitignore` excludes outputs). `*_64.dll`
+  files are build artifacts: untracked, never commit them.

@@ -1,0 +1,32 @@
+{
+  "_comment": "SWEEP mode single set (no grid): standalone Orion trigger approximation.",
+  "strategy": "orion_bar",
+  "strategy_params": {
+    "tick_size": 0.25,
+    "setup_min_delta": 200,
+    "climax_min": 0,
+    "rebound_mode": 1,
+    "rebound_abs": 100,
+    "rebound_pct": 50,
+    "lifetime_bars": 3,
+    "invalidate_ticks": 0,
+    "allow_long": true,
+    "allow_short": true
+  },
+  "tick_size": 0.25,
+  "tick_value": 12.5,
+  "engine": {
+    "qty": 1,
+    "stop_ticks": 12,
+    "target_ticks": 24,
+    "fee_per_side": 2.1,
+    "slippage_ticks": 1,
+    "exec_mode": "next_open",
+    "allow_long": true,
+    "allow_short": true,
+    "exit_on_opposite": true,
+    "reverse_on_opposite": false,
+    "max_hold_bars": 0,
+    "regime": "mean-reversion"
+  }
+}

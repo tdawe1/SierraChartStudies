@@ -1661,7 +1661,7 @@ SCSFExport scsf_OrionAccountBalance(SCStudyInterfaceRef sc) {
 	double opening_base = opening;
 	if (InOpeningIncludesDay.GetYesNo() != 0)
 		opening_base = opening - daily_closed;
-	const double live = (available != 0) ? available : opening_base + day_net + pos_net;
+	const double live = have_fields ? available : opening_base + day_net + pos_net;
 	auto draw_balance = [&](int line_number, int vpos, const SCString& line_text) {
 		s_UseTool tool;
 		tool.Clear();
