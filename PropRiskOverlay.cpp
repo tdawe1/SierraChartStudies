@@ -173,6 +173,17 @@ SCSFExport scsf_PropRiskOverlay(SCStudyInterfaceRef sc) {
     const int have_fields = sc.GetTradeAccountData(fields, account);
     const double available = have_fields != 0
         ? fields.m_AvailableFundsForNewPositions : 0.0;
+    // Fail closed: no account data and no explicit manual mode means halt
+    // this bar (the date latch below is untouched, so recovery on the next
+    // good bar is automatic). A risk overlay must never publish OK on stale
+    // numbers after a feed drop.
+    if (have_fields == 0 && InUseManual.GetYesNo() == 0)
+    {
+        Halt[sc.Index] = 1.0f;
+        if (sc.Index == sc.ArraySize - 1)
+            sc.AddMessageToLog("PropRiskOverlay: account data unavailable; halting", 1);
+        return;
+    }
     double opening = static_cast<double>(InOpening.GetFloat());
     if (InUseManual.GetYesNo() == 0 && have_fields != 0 && fields.m_AccountValue != 0)
         opening = fields.m_AccountValue;
@@ -219,7 +230,7 @@ SCSFExport scsf_PropRiskOverlay(SCStudyInterfaceRef sc) {
     // Halt latch: a breach holds for the UTC day. A new UTC day or a
     // No->Yes cycle of "Reset halt latch" clears it, but a still-true
     // breach re-latches immediately (fail-closed).
-    const int today_utc = sc.CurrentSystemDateTime.GetDate();
+    const int today_utc = sc.AdjustDateTimeToGMT(sc.CurrentSystemDateTime).GetDate();
     int& halt_date = sc.GetPersistentInt(1);
     int& last_reset = sc.GetPersistentInt(2);
     int& last_flatten = sc.GetPersistentInt(3);
