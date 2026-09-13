@@ -59,6 +59,16 @@ def run_remote(host: str, bundle: str, remote_dir: str = "/tmp/bt",
                     + (" (dry-run, not sent)" if dry_run else ""))
     if dry_run:
         return cmds, local_out
-    for c in cmds[:4]:
-        subprocess.run(c, shell=True, check=True)
+    try:
+        for c in cmds[:4]:
+            subprocess.run(c, shell=True, check=True)
+    finally:
+        # Best-effort: never leave remote workspaces behind on failure.
+        try:
+            subprocess.run(
+                f"ssh {shlex.quote(host)} "
+                f"{shlex.quote(f'rm -rf {workdir} {remote_tar}')}",
+                shell=True, check=False, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            pass
     return cmds, local_out

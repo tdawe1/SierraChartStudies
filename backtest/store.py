@@ -63,7 +63,7 @@ def connect(db_path: str | None = None) -> sqlite3.Connection:
 
 
 def make_id(study: str, dataset: str, params: dict) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     blob = json.dumps({"s": study, "d": dataset, "p": params}, sort_keys=True)
     digest = hashlib.sha1(blob.encode()).hexdigest()[:6]
     safe = "".join(c if c.isalnum() else "_" for c in study)[:24]
