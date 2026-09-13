@@ -180,10 +180,11 @@ SCSFExport scsf_OrionExecutor(SCStudyInterfaceRef sc) {
     order.TimeInForce = SCT_TIF_DAY;
     const int stop_ticks = InStopTicks.GetInt();
     const int target_ticks = InTargetTicks.GetInt();
+    // Stop1Offset/Target1Offset are price offsets: convert tick counts.
     if (stop_ticks > 0)
-        order.Stop1Offset = static_cast<float>(stop_ticks);
+        order.Stop1Offset = static_cast<float>(stop_ticks * sc.TickSize);
     if (target_ticks > 0)
-        order.Target1Offset = static_cast<float>(target_ticks);
+        order.Target1Offset = static_cast<float>(target_ticks * sc.TickSize);
     order.TextTag = "orion-exec";
 
     const int result = direction > 0 ? sc.BuyEntry(order) : sc.SellEntry(order);

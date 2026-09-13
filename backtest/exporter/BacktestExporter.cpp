@@ -99,7 +99,11 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
         "DateTime,Open,High,Low,Close,Volume,BidVolume,AskVolume,"
         "MaxDelta,MinDelta,SignalLong,SignalShort,ATR14,RelVol50,"
         "BidClose,AskClose,Symbol";
-    if (sc.IsFullRecalculation)
+    // Append=No forces a full rebuild; otherwise a full recalculation
+    // rebuilds and an incremental update appends after validation.
+    const int appendMode = InAppend.GetYesNo() != 0;
+    char lastExportedDt[256] = {0};
+    if (sc.IsFullRecalculation || !appendMode)
     {
         f = fopen(InPath.GetString(), "w");
         if (f == nullptr)
@@ -115,18 +119,35 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
     {
         // Incremental update: never write a header here. Fail closed when
         // the existing file is missing or carries another schema instead
-        // of silently producing a mixed-schema CSV.
+        // of silently producing a mixed-schema CSV. Also capture the last
+        // exported DateTime so a rewound UpdateStartIndex (backfill or
+        // data correction) cannot silently append duplicate rows.
         f = fopen(InPath.GetString(), "r");
         int header_ok = 0;
         if (f != nullptr)
         {
-            char first[1024];
-            if (fgets(first, sizeof(first), f) != nullptr)
+            char line[1024];
+            if (fgets(line, sizeof(line), f) != nullptr)
             {
-                size_t len = strlen(first);
-                while (len > 0 && (first[len - 1] == '\n' || first[len - 1] == '\r'))
-                    first[--len] = '\0';
-                header_ok = (strcmp(first, HEADER) == 0);
+                size_t len = strlen(line);
+                while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+                    line[--len] = '\0';
+                header_ok = (strcmp(line, HEADER) == 0);
+            }
+            while (fgets(line, sizeof(line), f) != nullptr)
+            {
+                size_t len = strlen(line);
+                while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+                    line[--len] = '\0';
+                if (len == 0)
+                    continue;
+                char* comma = strchr(line, ',');
+                if (comma != nullptr && (size_t)(comma - line) < sizeof(lastExportedDt))
+                {
+                    size_t n = (size_t)(comma - line);
+                    memcpy(lastExportedDt, line, n);
+                    lastExportedDt[n] = '\0';
+                }
             }
             fclose(f);
             f = nullptr;
@@ -152,6 +173,10 @@ SCSFExport scsf_BacktestExporter(SCStudyInterfaceRef sc)
     for (int i = startIndex; i <= lastClosed; ++i)
     {
         SCString dt = sc.DateTimeToString(sc.BaseDateTimeIn[i], FLAG_DT_COMPLETE_DATETIME);
+        // Skip bars already on disk (FLAG_DT_COMPLETE_DATETIME is fixed-width,
+        // so lexicographic compare is chronological).
+        if (lastExportedDt[0] != '\0' && strcmp(dt.GetChars(), lastExportedDt) <= 0)
+            continue;
         const double bid = sc.BidVolume[i];
         const double ask = sc.AskVolume[i];
         const double mx = haveMax ? (double)maxArr[i] : (ask - bid);

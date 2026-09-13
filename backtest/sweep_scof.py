@@ -53,7 +53,6 @@ def main(argv=None):
     bars = load_csv(a.bars)
     fp = load_footprint(a.fp, a.tick_size)
     foot = [sorted(fp.get(b.stamp, [])) for b in bars]
-    rows = list(csv.DictReader(open(a.bars, newline="")))
     keys = sorted(GRID)
     print(f"{len(bars)} bars, "
           f"{sum(1 for f in foot if not f)} without footprint")
@@ -63,15 +62,26 @@ def main(argv=None):
         d = os.path.join(a.out, f"{a.tag_prefix}_{name}")
         os.makedirs(d, exist_ok=True)
         sig = scof_absorption(bars, foot, tick_size=a.tick_size, **sp)
+        assert len(sig) == len(bars), "signal/bar length mismatch"
         sig_path = os.path.join(d, "signals.csv")
+        # Materialize from the accepted bars (not the raw file): load_csv
+        # drops bad-OHLC rows, so zipping signals onto raw rows would
+        # silently shift every post-drop signal. do_run reloads this file
+        # through load_csv, which accepts this exact column contract.
         with open(sig_path, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            w = csv.DictWriter(f, fieldnames=[
+                "DateTime", "Open", "High", "Low", "Close", "Volume",
+                "BidVolume", "AskVolume", "MaxDelta", "MinDelta",
+                "SignalLong", "SignalShort"])
             w.writeheader()
-            for r, s in zip(rows, sig):
-                r = dict(r)
-                r["SignalLong"] = "1" if s == 1 else "0"
-                r["SignalShort"] = "1" if s == -1 else "0"
-                w.writerow(r)
+            for b, s in zip(bars, sig):
+                w.writerow({
+                    "DateTime": b.stamp, "Open": b.open, "High": b.high,
+                    "Low": b.low, "Close": b.close, "Volume": b.volume,
+                    "BidVolume": b.bidvol, "AskVolume": b.askvol,
+                    "MaxDelta": b.maxdelta, "MinDelta": b.mindelta,
+                    "SignalLong": "1" if s == 1 else "0",
+                    "SignalShort": "1" if s == -1 else "0"})
         n = sum(1 for s in sig if s)
         res = do_run(sig_path, a.params, os.path.join(d, "run"),
                      tag=f"{a.tag_prefix} {name}", quiet=True)

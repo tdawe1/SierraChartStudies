@@ -58,6 +58,17 @@ class OrbMathTests(unittest.TestCase):
         self.assertAlmostEqual(t["exit_price"], 96.5)
         self.assertEqual(t["reason"], "target")
 
+    def test_use_shorts_false_never_shorts(self):
+        # Same bars as test_short_target (a clean short setup), but with
+        # shorts disabled no short may open on any bar.
+        bars = or_bars() + [m(575, 100, 100.5, 97.5, 98),
+                            m(576, 98, 102.0, 97.0, 100),
+                            m(577, 100, 100.5, 96.0, 97)]
+        tr = orb_retrace(bars, tick_size=1.0, or_start_min=570,
+                         or_end_min=575, breakout_ticks=0, vp_level=0,
+                         use_shorts=False)
+        self.assertTrue(all(t["dir"] != -1 for t in tr))
+
     def test_eod_flat(self):
         bars = or_bars() + [m(575, 103, 104.5, 103.5, 104),
                             m(576, 104, 104.2, 101.0, 102),

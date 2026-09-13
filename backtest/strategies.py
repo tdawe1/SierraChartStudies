@@ -628,6 +628,7 @@ def orb_retrace(bars: list[Bar],
         elif phase == 3:
             if not use_shorts:
                 phase = 6
+                continue
             if b.high >= level and _weekday(b.stamp) in trade_days:
                 pos, phase = -1, 5
                 stop = or_high

@@ -6,6 +6,18 @@ ticks, replays the frozen config over full history, and appends only
 trades not already in that system's ledger. Safe to run daily.
 
   python3 paper_orb.py --run   # update all ledgers in SYSTEMS
+  python3 paper_orb.py --run --skip-convert  # reuse existing CSVs, no scid import
+
+Contract rollover: override any system's .scid path without editing code:
+
+  PAPER_ORB_SCID_NQ_ALL=/path/to/NQZ26-CME.scid python3 paper_orb.py --run
+
+(env name is PAPER_ORB_SCID_ + system name, uppercased, '-' -> '_').
+
+Prerequisite for conversion: a `scid` module exposing
+`convert(scid_path, csv_path, bar_minutes, divisor, tz_offset)`.
+Without it, use --skip-convert with pre-converted per-system CSVs at
+/home/user/bt-data/paper-<name>.csv.
 
 Systems: nq-all (primary, replicated), nq-wt (weekday hypothesis,
 forward test only), ym-val (secondary, replicated IS+OOS).
@@ -34,23 +46,54 @@ SYSTEMS = {
 }
 FEE = 2.10
 
+def _scid_path(name: str, default: str) -> str:
+    env = "PAPER_ORB_SCID_" + name.upper().replace("-", "_")
+    return os.environ.get(env, default)
+
 
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="ORB paper trader (all systems)")
     ap.add_argument("--run", action="store_true")
+    ap.add_argument("--skip-convert", action="store_true",
+                    help="reuse existing per-system CSVs instead of converting .scid")
     a = ap.parse_args(argv)
     if not a.run:
         ap.print_help()
         return 0
-    from scid import convert
+    try:
+        from scid import convert
+    except ImportError:
+        convert = None
     from data import load_csv
     from strategies import orb_retrace, orb_trade_pnl
+    if convert is None and not a.skip_convert:
+        print("paper-orb: no 'scid' converter module available; "
+              "pre-convert the bars or re-run with --skip-convert",
+              file=sys.stderr)
+        return 2
     for name, (scid, divisor, usd_pt, _tv, override, ledger_dir) in SYSTEMS.items():
         bars_path = f"/home/user/bt-data/paper-{name}.csv"
         ledger = os.path.join(_HERE, "runs", ledger_dir, "ledger.csv")
-        convert(scid, bars_path, 1, divisor, -4.0)
-        bars = load_csv(bars_path)
+        if a.skip_convert:
+            if not os.path.exists(bars_path):
+                print(f"paper-orb [{name}]: {bars_path} missing; "
+                      f"convert {scid} first", file=sys.stderr)
+                continue
+        else:
+            try:
+                convert(_scid_path(name, scid), bars_path, 1, divisor, -4.0)
+            except OSError as e:
+                # Dead/missing contract must not block later systems.
+                print(f"paper-orb [{name}]: convert failed ({e}); skipping",
+                      file=sys.stderr)
+                continue
+        try:
+            bars = load_csv(bars_path)
+        except (OSError, ValueError) as e:
+            print(f"paper-orb [{name}]: cannot load {bars_path} ({e}); skipping",
+                  file=sys.stderr)
+            continue
         cfg = dict(_BASE_CFG)
         cfg.setdefault("tick_size", 0.25)
         cfg.update(override)

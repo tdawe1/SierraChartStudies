@@ -1,6 +1,9 @@
 #include "sierrachart.h"
 
 SCDLLName("Initial Balance Statistics")
+// SCDateTime is days-as-double: day-fraction durations for datetime arithmetic.
+static const double MINUTES = 1.0 / (24.0 * 60.0);
+static const double MICROSECONDS = 1.0 / (24.0 * 60.0 * 60.0 * 1000000.0);
 
 SCSFExport scsf_InitialBalanceStatistics(SCStudyInterfaceRef sc)
 {
@@ -249,7 +252,7 @@ SCSFExport scsf_InitialBalanceStatistics(SCStudyInterfaceRef sc)
 		// Check start of new intraday period
 		if (Intraday)
 		{
-			// Durations are file-scope day-fraction constants (no MINUTES()/MICROSECONDS() members).
+			// Durations are the file-scope day-fraction constants above.
 			SCDateTimeMS IntradayEndDateTime = PeriodStartDateTime + MINUTES * Input_NumberOfMinutes.GetInt() - MICROSECONDS;
 
 			if (PrevBarDateTime < IntradayEndDateTime && CurrentBarDateTime > IntradayEndDateTime)

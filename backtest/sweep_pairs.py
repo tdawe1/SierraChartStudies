@@ -55,7 +55,13 @@ def main(argv=None):
                 for t in trades]
         m = pairs_metrics(pnls)
         json.dump({"metrics": m}, open(os.path.join(d, "summary.json"), "w"))
-        json.dump(sp, open(os.path.join(d, "params.json"), "w"), indent=1)
+        # Persist every result-affecting input, not just the grid combo,
+        # so a selected artefact reproduces exactly.
+        json.dump({"grid": sp, "leg1": a.leg1, "leg2": a.leg2,
+                   "leg1_usd_pt": a.leg1_usd_pt, "leg2_usd_pt": a.leg2_usd_pt,
+                   "leg1_tick_value": a.leg1_tick_value,
+                   "leg2_tick_value": a.leg2_tick_value},
+                  open(os.path.join(d, "params.json"), "w"), indent=1)
         rows.append((m["total_pnl"], m["trades"], m["profit_factor"], name))
     rows.sort(reverse=True)
     for total, n, pf, name in rows:

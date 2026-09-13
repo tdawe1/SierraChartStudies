@@ -58,7 +58,13 @@ def main(argv=None):
         m = pairs_metrics(pnls)
         m["days"] = len({b.stamp[:10] for b in bars})
         json.dump({"metrics": m}, open(os.path.join(d, "summary.json"), "w"))
-        json.dump(sp, open(os.path.join(d, "params.json"), "w"), indent=1)
+        # Persist every result-affecting input, not just the grid combo,
+        # so a selected artefact reproduces exactly.
+        json.dump({"grid": sp, "data": a.data, "frm": a.frm, "to": a.to,
+                   "usd_per_pt": a.usd_per_pt, "tick_size": a.tick_size,
+                   "or_start": a.or_start, "or_end": a.or_end, "eod": a.eod,
+                   "cutoffs": a.cutoffs},
+                  open(os.path.join(d, "params.json"), "w"), indent=1)
         rows.append((m["total_pnl"], m["trades"], m["profit_factor"], name))
     rows.sort(reverse=True)
     for total, n, pf, name in rows:
