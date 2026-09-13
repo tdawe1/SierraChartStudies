@@ -15,10 +15,13 @@ leaderboard. That is the whole system in miniature.
 
 ## Daily workflow
 
-**1. Get data out of the chart.** Copy `exporter/BacktestExporter.cpp`
-into `ACS_Source`, Remote Build, add to the chart wired to your
-trigger/setup subgraphs (e.g. Orion *Trigger Long/Short*) plus Numbers
-Bars Max/Min delta. Recalculate, copy the CSV over.
+**1a. No chart needed (offline strategies).** Convert Sierra tick files
+straight to bars — no exporter, no Recalculate, no copy-paste:
+`python3 bt.py scid --scid ~/.wine/drive_c/SierraChart/Data/ESU6.CME.scid --out ESU6-5m.csv`
+(16.6M ticks → 20k bars in ~12s; `--check-dly 2026/09/10` verifies price
+scale against the `.dly` row). Automatable per contract roll or on a
+cron/scp pull from the Sierra box.
+**1b. Get data out of the chart (exact chart signals only).** Copy `exporter/BacktestExporter.cpp`
 
 **2. Log runs.** Every run is stored in `results.db` with its artifacts
 under `results/<run-id>/` — comparing is a query, not a pile of CSVs.
@@ -146,7 +149,7 @@ metric keys are reported as "added since" rather than mismatches.
 
 ## Files
 
-`bt.py` (CLI) · `engine.py` (fills + metrics + prop risk) · `data.py` (CSV contract) ·
+`bt.py` (CLI) · `scid.py` (.scid tick → bar CSV) · `engine.py` (fills + metrics + prop risk) · `data.py` (CSV contract) ·
 `strategies.py` (study adapters + orion_core ports) · `store.py`
 (sqlite registry) · `report.py` (leaderboard + HTML/SVG) · `remote.py`
 (SSH runner) · `notify.py` (completion email) · `journal.py` (time-of-day) ·
