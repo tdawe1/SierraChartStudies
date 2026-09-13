@@ -150,8 +150,9 @@ class TestGuideNotify(unittest.TestCase):
         self.assertEqual(msg["To"], "a@b.c")
         self.assertIn("a@b.c", describe("a@b.c"))
         from remote import run_remote
-        cmds = run_remote("h", "b.tgz", dry_run=True, notify="a@b.c")
+        cmds, local_out = run_remote("h", "b.tgz", dry_run=True, notify="a@b.c")
         self.assertTrue(any(c.startswith("email a@b.c") for c in cmds))
+        self.assertTrue(local_out.startswith("./out-"))
 
 
 class TestPromote(unittest.TestCase):

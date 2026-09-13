@@ -99,26 +99,26 @@ def build_html(runs: list[dict], title: str = "Study comparison") -> str:
     th = "".join(f"<th>{label}</th>" for _, label in COLS)
     th += "<th>Trials</th>"
     if has_oos:
-        th += "<th>IS $</th><th>OOS $</th>"
+        th += "<th>IS $</th><th>OOS $</th><th title=\"overfit flag\">&#9888;</th>"
     rows = []
     for i, r in enumerate(ordered, 1):
         m = r["metrics"]
         tds = "".join(f"<td>{_fmt(m, k)}</td>" for k, _ in COLS)
+        trials = r.get("n_trials")
+        tds += f"<td>{trials if trials is not None else '-'}</td>"
         if has_oos:
             isv = (r.get("is_metrics") or {}).get("total_pnl", "-")
             oosv = (r.get("oos_metrics") or {}).get("total_pnl", "-")
             tds += f"<td>{isv}</td><td>{oosv}</td>"
-        flag = ""
+        flag = "<td></td>" if has_oos else ""
         if r.get("is_metrics") and r.get("oos_metrics"):
             if r["is_metrics"].get("total_pnl", 0) > 0 >= r["oos_metrics"].get("total_pnl", 0):
-                flag = ' <b style="color:#b45309" title="profitable in-sample, flat/losing out-of-sample">&#9888;</b>'
-        trials = r.get("n_trials")
+                flag = '<td><b style="color:#b45309" title="profitable in-sample, flat/losing out-of-sample">&#9888;</b></td>'
         rows.append(
             f"<tr><td>{i}</td><td><code>{html.escape(r['id'])}</code></td>"
             f"<td>{html.escape(r['study'])}</td>"
             f"<td>{html.escape(r['dataset'].split('/')[-1])}</td>"
-            f"<td>{html.escape(r.get('tag', ''))}</td>{tds}"
-            f"<td>{trials if trials is not None else '-'}</td>{flag}</tr>")
+            f"<td>{html.escape(r.get('tag', ''))}</td>{tds}{flag}</tr>")
     curves = [(f"{r['study']} {r.get('tag', '')} ({r['id'][-6:]})".strip(),
                [v for _, v in r.get("equity", [])]) for r in ordered]
     cards = []

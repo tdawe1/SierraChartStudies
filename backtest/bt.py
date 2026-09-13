@@ -821,6 +821,15 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--notify", default="", help="email results on completion")
     p.add_argument("--sender", default="bt@localhost")
+    p = sub.add_parser("scid", help="convert Sierra .scid ticks to bar CSV (no chart needed)")
+    p.add_argument("--scid", required=True, help="input .scid tick file")
+    p.add_argument("--out", required=True, help="output bar CSV")
+    p.add_argument("--minutes", type=int, default=5, help="bar size in minutes")
+    p.add_argument("--divisor", type=float, default=100.0, help="raw tick price divisor (legacy hundredths files: 100; current SYM-YYYYMM points files: 1)")
+    p.add_argument("--tz-offset", type=float, default=0.0, help="hours added to output stamps (chart join: -4 EDT)")
+    p.add_argument("--footprint", default="", help="also write per-level footprint sidecar CSV here")
+    p.add_argument("--check-dly", default="", help="verify one day YYYY/MM/DD against the .dly row")
+    p.add_argument("--dly", default="", help=".dly check file (default: <scid>.dly)")
 
     a = ap.parse_args()
     if a.cmd == "run":
@@ -869,21 +878,38 @@ def main() -> None:
         with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as f:
             bundle = f.name
         build_bundle(src, a.data, a.params, bundle, job_name=a.job)
-        for c in run_remote(a.host, bundle, remote_dir=a.remote_dir,
-                            job_name=a.job, dry_run=a.dry_run,
-                            notify=a.notify or None):
+        cmds, local_out = run_remote(a.host, bundle, remote_dir=a.remote_dir,
+                                     job_name=a.job, dry_run=a.dry_run,
+                                     notify=a.notify or None)
+        for c in cmds:
             print(c)
         os.unlink(bundle)
         if a.notify and not a.dry_run:
             from notify import send
-            outdir = f"./out-{a.job}"
-            rep = os.path.join(outdir, "report.txt")
+            rep = os.path.join(local_out, "report.txt")
             body = open(rep).read() if os.path.exists(rep) else "(no report found)"
             try:
                 print(send(a.notify, f"[bt] {a.job} complete", body,
                            sender=a.sender))
             except RuntimeError as e:
                 print(f"warning: {e}")
+    elif a.cmd == "scid":
+        from scid import convert, check_dly
+        import os as _os
+        n = convert(a.scid, a.out, a.minutes, a.divisor, a.tz_offset,
+                    a.footprint)
+        from data import load_csv
+        bars = load_csv(a.out)  # fail fast if the contract broke
+        assert len(bars) == n, f"wrote {n} bars but loaded {len(bars)}"
+        print(f"validated: {len(bars)} bars load clean "
+              f"({bars[0].stamp} -> {bars[-1].stamp})")
+        if a.check_dly:
+            base = _os.path.basename(a.scid)
+            if base.endswith(".scid"):
+                base = base[:-len(".scid")]
+            dly = a.dly or _os.path.join(_os.path.dirname(a.scid), base + ".dly")
+            if not check_dly(a.out, dly, a.check_dly):
+                raise SystemExit(1)
 
 
 if __name__ == "__main__":

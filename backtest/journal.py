@@ -94,10 +94,10 @@ def load_journal(path: str, point_value: float = 1.0) -> list[dict]:
             qty = _num(raw_qty) if raw_qty else 1.0
             if qty <= 0:
                 raise ValueError(f"bad qty {raw_qty!r} at {stamp} in {path}")
-            entry, exit = _num(row.get("entry", "")), _num(row.get("exit", ""))
+            entry, exit_px = _num(row.get("entry", "")), _num(row.get("exit", ""))
             pnl = _num(row.get("pnl", ""))
-            if not row.get("pnl", "").strip() and side and entry and exit:
-                pnl = side * (exit - entry) * qty * point_value
+            if not row.get("pnl", "").strip() and side and entry and exit_px:
+                pnl = side * (exit_px - entry) * qty * point_value
             rows.append({"stamp": stamp, "symbol": row.get("symbol", ""),
                          "side": side, "qty": qty, "pnl": pnl})
     if not rows:

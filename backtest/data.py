@@ -98,7 +98,7 @@ def load_csv(path: str) -> list[Bar]:
                 signal_short=int(_num(row, "signal_short") > 0),
                 symbol=(row.get("symbol", "") or "").strip(),
                 atr=_num(row, "atr"),
-                relvol=_num(row, "relvol") if "relvol" in row else 1.0,
+                relvol=_num(row, "relvol") or 1.0,
             ))
             idx += 1
     if not bars:

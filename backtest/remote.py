@@ -34,8 +34,9 @@ def build_bundle(src_dir: str, data_path: str, params_path: str,
 
 def run_remote(host: str, bundle: str, remote_dir: str = "/tmp/bt",
                job_name: str = "job", dry_run: bool = False,
-               extra_args: str = "", notify: str | None = None) -> list[str]:
-    """Copy bundle, run it, copy results back. Returns the commands used.
+               extra_args: str = "", notify: str | None = None) -> tuple:
+    """Copy bundle, run it, copy results back.
+    Returns (commands used, local output dir).
 
     Each call gets a unique remote workspace (mode 700) and local
     output dir, so concurrent runs never share paths."""
@@ -57,7 +58,7 @@ def run_remote(host: str, bundle: str, remote_dir: str = "/tmp/bt",
         cmds.append(f"email {notify} < {local_out}/report.txt"
                     + (" (dry-run, not sent)" if dry_run else ""))
     if dry_run:
-        return cmds
+        return cmds, local_out
     for c in cmds[:4]:
         subprocess.run(c, shell=True, check=True)
-    return cmds
+    return cmds, local_out
